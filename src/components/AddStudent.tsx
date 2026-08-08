@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, FileSpreadsheet, CheckCircle, Trash2, AlertCircle, Info } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, Trash2, AlertCircle, Info, Lock } from 'lucide-react';
 import type { Student } from '../types/student';
+import type { User } from '../types/auth';
 import './AddStudent.css';
 
 interface AddStudentProps {
   students: Student[];
   onAddStudents: (newStudents: Student[]) => Promise<void>;
+  currentUser: (User & { can_manage?: boolean }) | null;
 }
 
 interface Notification {
@@ -14,12 +16,15 @@ interface Notification {
   message: string;
 }
 
-export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents }) => {
+export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUser }) => {
   const [parsedStudents, setParsedStudents] = useState<Student[]>([]);
   const [fileName, setFileName] = useState<string>('');
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<Notification | null>(null);
+
+  // Kiểm tra quyền quản lý thực tế
+  const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
   // Hàm hiển thị thông báo đẹp tự động ẩn sau 4 giây
   const showNotification = (type: 'success' | 'error' | 'info', message: string) => {
@@ -30,6 +35,11 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents }) => {
   };
 
   const processExcelFile = (file: File) => {
+    if (!canManage) {
+      showNotification('error', 'Bạn không có quyền thực hiện thao tác này!');
+      return;
+    }
+
     if (!file.name.match(/\.(xlsx|xls|xlsm)$/i)) {
       showNotification('error', 'Vui lòng tải lên file Excel đúng định dạng (.xlsx, .xls, .xlsm)!');
       return;
@@ -130,13 +140,13 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents }) => {
   const handleDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(true);
+    if (canManage) setIsDragging(true);
   };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setIsDragging(true);
+    if (canManage) setIsDragging(true);
   };
 
   const handleDragLeave = (e: React.DragEvent) => {
@@ -150,19 +160,33 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents }) => {
     e.stopPropagation();
     setIsDragging(false);
 
+    if (!canManage) {
+      showNotification('error', 'Tài khoản của bạn chưa được cấp phép thêm sinh viên!');
+      return;
+    }
+
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       processExcelFile(e.dataTransfer.files[0]);
     }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!canManage) {
+      showNotification('error', 'Tài khoản của bạn chưa được cấp phép thêm sinh viên!');
+      return;
+    }
     if (e.target.files && e.target.files[0]) {
       processExcelFile(e.target.files[0]);
     }
   };
 
   const handleSaveToDatabase = async () => {
+    if (!canManage) {
+      showNotification('error', 'Bạn không có quyền lưu dữ liệu này!');
+      return;
+    }
     if (parsedStudents.length === 0) return;
+    
     setLoading(true);
     try {
       await onAddStudents(parsedStudents);
@@ -228,86 +252,103 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents }) => {
         <p>Kéo thả hoặc chọn file Excel danh sách môn học/danh sách lớp</p>
       </div>
 
-      <div
-        className={`dropzone ${isDragging ? 'dragging' : ''}`}
-        onDragEnter={handleDragEnter}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-      >
-        <input
-          type="file"
-          accept=".xlsx, .xls, .xlsm"
-          id="excel-file-input"
-          onChange={handleFileChange}
-          hidden
-        />
-        <label htmlFor="excel-file-input" className="dropzone-label">
-          <FileSpreadsheet size={48} className="icon-excel" />
-          <div className="dropzone-text">
-            <strong>Kéo & thả file Excel vào đây</strong>
-            <span>hoặc <u>bấm vào đây</u> để chọn file từ máy tính</span>
-          </div>
-          <span className="file-hint">Hỗ trợ file: .xlsx, .xls, .xlsm</span>
-        </label>
-      </div>
-
-      {parsedStudents.length > 0 && (
-        <div className="preview-section">
-          <div className="preview-header">
-            <div className="file-info">
-              <CheckCircle color="#16a34a" size={20} />
-              <span>
-                File: <strong>{fileName}</strong> (Nhận diện thành công <strong>{parsedStudents.length}</strong> sinh viên)
-              </span>
-            </div>
-            <div className="actions">
-              <button
-                className="btn-cancel"
-                onClick={() => { setParsedStudents([]); setFileName(''); }}
-                disabled={loading}
-              >
-                <Trash2 size={16} /> Hủy
-              </button>
-              <button
-                className="btn-save"
-                onClick={handleSaveToDatabase}
-                disabled={loading}
-              >
-                <Upload size={16} /> {loading ? 'Đang lưu...' : 'Lưu Vào Cơ Sở Dữ Liệu'}
-              </button>
-            </div>
-          </div>
-
-          <div className="table-wrapper">
-            <table className="excel-table">
-              <thead>
-                <tr>
-                  <th>STT</th>
-                  <th>MSSV</th>
-                  <th>Họ và tên (Đã gộp E:K)</th>
-                  <th>Giới tính</th>
-                  <th>Lớp</th>
-                </tr>
-              </thead>
-              <tbody>
-                {parsedStudents.map((st, idx) => (
-                  <tr key={idx}>
-                    <td>{idx + 1}</td>
-                    <td><strong className="mssv-text">{st.studentId}</strong></td>
-                    <td>{st.name}</td>
-                    <td>
-                      <span className={`gender-badge ${st.gender === 'Nữ' ? 'female' : 'male'}`}>
-                        {st.gender}
-                      </span>
-                    </td>
-                    <td>{st.className}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      {!canManage ? (
+        <div style={{
+          textAlign: 'center',
+          padding: '48px',
+          background: '#fff',
+          borderRadius: '12px',
+          border: '1px solid #e2e8f0',
+          marginTop: '20px'
+        }}>
+          <Lock size={48} color="#ef4444" style={{ marginBottom: '16px' }} />
+          <h3 style={{ color: '#1e293b', marginBottom: '8px' }}>Tài khoản chưa được cấp quyền</h3>
+          <p style={{ color: '#64748b' }}>Bạn cần được Quản trị viên tích chọn cấp quyền quản lý để sử dụng chức năng thêm sinh viên.</p>
         </div>
+      ) : (
+        <>
+          <div
+            className={`dropzone ${isDragging ? 'dragging' : ''}`}
+            onDragEnter={handleDragEnter}
+            onDragOver={handleDragOver}
+            onDragLeave={handleDragLeave}
+            onDrop={handleDrop}
+          >
+            <input
+              type="file"
+              accept=".xlsx, .xls, .xlsm"
+              id="excel-file-input"
+              onChange={handleFileChange}
+              hidden
+            />
+            <label htmlFor="excel-file-input" className="dropzone-label" style={{ cursor: 'pointer' }}>
+              <FileSpreadsheet size={48} className="icon-excel" />
+              <div className="dropzone-text">
+                <strong>Kéo & thả file Excel vào đây</strong>
+                <span>hoặc <u>bấm vào đây</u> để chọn file từ máy tính</span>
+              </div>
+              <span className="file-hint">Hỗ trợ file: .xlsx, .xls, .xlsm</span>
+            </label>
+          </div>
+
+          {parsedStudents.length > 0 && (
+            <div className="preview-section">
+              <div className="preview-header">
+                <div className="file-info">
+                  <CheckCircle color="#16a34a" size={20} />
+                  <span>
+                    File: <strong>{fileName}</strong> (Nhận diện thành công <strong>{parsedStudents.length}</strong> sinh viên)
+                  </span>
+                </div>
+                <div className="actions">
+                  <button
+                    className="btn-cancel"
+                    onClick={() => { setParsedStudents([]); setFileName(''); }}
+                    disabled={loading}
+                  >
+                    <Trash2 size={16} /> Hủy
+                  </button>
+                  <button
+                    className="btn-save"
+                    onClick={handleSaveToDatabase}
+                    disabled={loading}
+                  >
+                    <Upload size={16} /> {loading ? 'Đang lưu...' : 'Lưu Vào Cơ Sở Dữ Liệu'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="table-wrapper">
+                <table className="excel-table">
+                  <thead>
+                    <tr>
+                      <th>STT</th>
+                      <th>MSSV</th>
+                      <th>Họ và tên</th>
+                      <th>Giới tính</th>
+                      <th>Lớp</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedStudents.map((st, idx) => (
+                      <tr key={idx}>
+                        <td>{idx + 1}</td>
+                        <td><strong className="mssv-text">{st.studentId}</strong></td>
+                        <td>{st.name}</td>
+                        <td>
+                          <span className={`gender-badge ${st.gender === 'Nữ' ? 'female' : 'male'}`}>
+                            {st.gender}
+                          </span>
+                        </td>
+                        <td>{st.className}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

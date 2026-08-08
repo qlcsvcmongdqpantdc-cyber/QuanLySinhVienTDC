@@ -1,21 +1,27 @@
 import React, { useState } from 'react';
 import { supabase } from '../supabaseClient';
 import type { Student } from '../types/student';
+import type { User } from '../types/auth';
 import './ManageStudents.css';
 
 interface ManageStudentsProps {
   students: Student[];
   onToggleAttendance: (targetId: string, field: 'isAbsent' | 'isLate') => void;
   onRefresh?: () => void;
+  currentUser?: (User & { can_manage?: boolean }) | null;
 }
 
 export function ManageStudents({
   students,
   onToggleAttendance,
   onRefresh,
+  currentUser,
 }: ManageStudentsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState('all');
+
+  // Kiểm tra quyền quản lý
+  const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
   // State Modal Nhập thông tin Kết thúc khóa học
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -46,6 +52,11 @@ export function ManageStudents({
   // 🌟 SAO LƯU DỮ LIỆU SANG 'KhoaHocDaKetThuc' RỒI MỚI XÓA BẢNG 'DanhSachSinhVien'
   const handleConfirmEndCourse = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    if (!canManage) {
+      alert('Bạn không có quyền thực hiện thao tác này!');
+      return;
+    }
 
     if (!dot.trim() || !hocKy.trim() || !namHoc.trim()) return;
 
@@ -144,9 +155,11 @@ export function ManageStudents({
           <span className="stat-badge absent">🙅 Vắng: {absentCount}</span>
           <span className="stat-badge late">⏰ Trễ: {lateCount}</span>
 
-          <button onClick={() => setIsModalOpen(true)} className="btn-end-course">
-            <span>🎓</span> Kết thúc khóa học
-          </button>
+          {canManage && (
+            <button onClick={() => setIsModalOpen(true)} className="btn-end-course">
+              <span>🎓</span> Kết thúc khóa học
+            </button>
+          )}
         </div>
       </div>
 
@@ -211,16 +224,20 @@ export function ManageStudents({
                     <input
                       type="checkbox"
                       checked={student.isAbsent || false}
-                      onChange={() => onToggleAttendance(student.id || student.studentId, 'isAbsent')}
+                      disabled={!canManage}
+                      onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isAbsent')}
                       className="checkbox-absent"
+                      style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
                     />
                   </td>
                   <td className="text-center">
                     <input
                       type="checkbox"
                       checked={student.isLate || false}
-                      onChange={() => onToggleAttendance(student.id || student.studentId, 'isLate')}
+                      disabled={!canManage}
+                      onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isLate')}
                       className="checkbox-late"
+                      style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
                     />
                   </td>
                 </tr>
@@ -231,7 +248,7 @@ export function ManageStudents({
       </div>
 
       {/* 1️⃣ POPUP MODAL NHẬP THÔNG TIN KẾT THÚC KHÓA HỌC */}
-      {isModalOpen && (
+      {isModalOpen && canManage && (
         <div className="modal-overlay">
           <div className="modal-card">
             <div className="modal-header-icon">🎓</div>
@@ -366,3 +383,5 @@ export function ManageStudents({
     </div>
   );
 }
+
+export default ManageStudents;

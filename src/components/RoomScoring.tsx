@@ -3,6 +3,7 @@ import { ClipboardCheck, Search, ShieldAlert, DoorClosed, RefreshCw, FileSpreads
 import * as XLSX from 'xlsx';
 import { supabase } from '../supabaseClient';
 import type { Student } from '../types/student';
+import type { User } from '../types/auth';
 import './RoomScoring.css';
 
 type ScoringStudent = Student & { room?: string; roomName?: string; gender?: string };
@@ -27,14 +28,18 @@ type ScoringMap = Record<string, Record<number, RecordEntry[]>>;
 
 interface RoomScoringProps {
   students: Student[];
+  currentUser?: (User & { can_manage?: boolean }) | null;
 }
 
-export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
+export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], currentUser }) => {
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [selectedRoom, setSelectedRoom] = useState<string>('Tất cả');
   const [scores, setScores] = useState<ScoringMap>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<boolean>(false);
+
+  // Kiểm tra quyền quản lý
+  const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
   // Danh sách các lỗi (bao gồm lỗi mặc định và lỗi tự chọn thêm vào)
   const [violations, setViolations] = useState(DEFAULT_VIOLATIONS);
@@ -102,7 +107,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
                   if (target) {
                     dayEntries.push({ code: target.code, displayCode: target.displayCode, penalty: target.penalty });
                   } else if (trimmedCode) {
-                    // Nếu trong DB có mã tự chọn cũ, tự động khôi phục vào danh sách
                     if (!extraViolationsMap.has(trimmedCode)) {
                       extraViolationsMap.set(trimmedCode, {
                         code: trimmedCode,
@@ -147,6 +151,8 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
   };
 
   const saveToSupabase = async (msv: string, hoVaTen: string, updatedScoresForStudent: Record<number, RecordEntry[]>, noteValue: string) => {
+    if (!canManage) return;
+
     const finalScore = (() => {
       let penalty = 0;
       Object.values(updatedScoresForStudent || {}).forEach((dayData) => {
@@ -171,6 +177,11 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
   };
 
   const handleToggleViolation = (student: ScoringStudent, day: number, code: string, displayCode: string, penalty: number) => {
+    if (!canManage) {
+      alert('Bạn không có quyền thay đổi điểm nề nếp!');
+      return;
+    }
+
     const studentKey = String(student.studentId || student.id);
     setScores((prev) => {
       const studentData = prev[studentKey] || {};
@@ -185,13 +196,20 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
   };
 
   const handleNoteBlur = (student: ScoringStudent, newNote: string) => {
+    if (!canManage) return;
+
     const studentKey = String(student.studentId || student.id);
     setNotes((prev) => ({ ...prev, [studentKey]: newNote }));
     saveToSupabase(studentKey, student.name, scores[studentKey] || '', newNote);
   };
 
-  // Xử lý khi chọn từ dropdown trong ô
   const handleSelectChange = (student: ScoringStudent, day: number, selectedValue: string, eventTarget: HTMLSelectElement) => {
+    if (!canManage) {
+      alert('Bạn không có quyền thực hiện thao tác này!');
+      eventTarget.value = '';
+      return;
+    }
+
     if (!selectedValue) return;
 
     if (selectedValue === 'ADD_CUSTOM') {
@@ -216,7 +234,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
         penalty: penalty,
       };
 
-      // Nếu mã này chưa có trong danh sách tổng thì thêm vào
       if (!violations.some((v) => v.code === newRule.code)) {
         setViolations((prev) => [...prev, newRule]);
       }
@@ -312,9 +329,11 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
         </div>
 
         <div className="header-actions">
-          <button onClick={handleExportExcel} className="btn-export" title="Xuất file Excel chia theo từng phòng">
-            <FileSpreadsheet size={16} /> Xuất Excel
-          </button>
+          {canManage && (
+            <button onClick={handleExportExcel} className="btn-export" title="Xuất file Excel chia theo từng phòng">
+              <FileSpreadsheet size={16} /> Xuất Excel
+            </button>
+          )}
 
           <div className="search-box">
             <Search size={16} className="search-icon" />
@@ -398,29 +417,31 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
                                 {dayViolations.map((v, i) => (
                                   <span
                                     key={i}
-                                    title={`Trừ ${v.penalty} điểm. Click để xóa`}
+                                    title={canManage ? `Trừ ${v.penalty} điểm. Click để xóa` : ''}
                                     className="violation-tag"
-                                    onClick={() => handleToggleViolation(st, day, v.code, v.displayCode, v.penalty)}
+                                    onClick={() => canManage && handleToggleViolation(st, day, v.code, v.displayCode, v.penalty)}
+                                    style={{ cursor: canManage ? 'pointer' : 'default' }}
                                   >
                                     {v.displayCode}
                                   </span>
                                 ))}
 
-                                <select
-                                  onChange={(e) => handleSelectChange(st, day, e.target.value, e.target)}
-                                  className="violation-select"
-                                >
-                                  <option value="">+</option>
-                                  {violations.map((v) => (
-                                    <option key={v.code} value={v.code}>
-                                      {v.code} (-{v.penalty}đ)
+                                {canManage && (
+                                  <select
+                                    onChange={(e) => handleSelectChange(st, day, e.target.value, e.target)}
+                                    className="violation-select"
+                                  >
+                                    <option value="">+</option>
+                                    {violations.map((v) => (
+                                      <option key={v.code} value={v.code}>
+                                        {v.code} (-{v.penalty}đ)
+                                      </option>
+                                    ))}
+                                    <option value="ADD_CUSTOM" style={{ fontWeight: 'bold', color: '#2563eb' }}>
+                                      ➕ Thêm lỗi...
                                     </option>
-                                  ))}
-                                  {/* Tùy chọn thêm mới trực tiếp bên trong */}
-                                  <option value="ADD_CUSTOM" style={{ fontWeight: 'bold', color: '#2563eb' }}>
-                                    ➕ Thêm lỗi...
-                                  </option>
-                                </select>
+                                  </select>
+                                )}
                               </div>
                             </td>
                           );
@@ -431,7 +452,8 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
                           <input
                             type="text"
                             defaultValue={notes[studentKey] || ''}
-                            onBlur={(e) => handleNoteBlur(st, e.target.value)}
+                            onBlur={(e) => canManage && handleNoteBlur(st, e.target.value)}
+                            disabled={!canManage}
                             placeholder="..."
                             className="note-input"
                           />
@@ -468,7 +490,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
               <div>• Không sắp xếp (<b>N</b>): -1 điểm</div>
             </div>
 
-            {/* Các tiêu chí tự chọn phát sinh sẽ tự động liệt kê ở đây */}
             {violations.length > DEFAULT_VIOLATIONS.length && (
               <div className="rule-group" style={{ borderTop: '1px dashed #cbd5e1', paddingTop: '8px', marginTop: '8px' }}>
                 <strong>5. Tiêu chí tự chọn khác</strong>
@@ -485,3 +506,5 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [] }) => {
     </div>
   );
 };
+
+export default RoomScoring;

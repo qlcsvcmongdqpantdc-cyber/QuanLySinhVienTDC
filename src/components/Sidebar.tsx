@@ -14,7 +14,7 @@ import type { User } from '../types/auth';
 interface SidebarProps {
   activeTab: TabType;
   setActiveTab: (tab: TabType) => void;
-  currentUser: User;
+  currentUser: User & { can_manage?: boolean };
   onLogout: () => void;
 }
 
@@ -24,6 +24,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentUser,
   onLogout,
 }) => {
+  const isAdmin = currentUser.role === 'admin';
+
   return (
     <div
       style={{
@@ -40,7 +42,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       }}
     >
       <div>
-        {/* LOGO & HEADING */}
         <div style={{ marginBottom: '24px', paddingLeft: '8px' }}>
           <h2 style={{ fontSize: '18px', fontWeight: 700, margin: 0, color: '#f8fafc' }}>
             Quản Lý Sinh Viên TDC
@@ -50,24 +51,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </p>
         </div>
 
-        {/* DANH SÁCH MENU TAB */}
         <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {/* TẤT CẢ CÁN BỘ ĐỀU THẤY CÁC TAB NGHIỆP VỤ NÀY */}
           <button
             onClick={() => setActiveTab('add')}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              border: 'none',
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+              borderRadius: '8px', border: 'none',
               backgroundColor: activeTab === 'add' ? '#2563eb' : 'transparent',
               color: activeTab === 'add' ? '#ffffff' : '#cbd5e1',
               fontWeight: activeTab === 'add' ? 600 : 500,
-              fontSize: '14px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'all 0.2s',
+              fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
             }}
           >
             <UserPlus size={18} /> Thêm Sinh Viên
@@ -76,19 +70,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => setActiveTab('manage')}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              border: 'none',
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+              borderRadius: '8px', border: 'none',
               backgroundColor: activeTab === 'manage' ? '#2563eb' : 'transparent',
               color: activeTab === 'manage' ? '#ffffff' : '#cbd5e1',
               fontWeight: activeTab === 'manage' ? 600 : 500,
-              fontSize: '14px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'all 0.2s',
+              fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
             }}
           >
             <Users size={18} /> Quản Lý & Điểm Danh
@@ -97,85 +84,56 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             onClick={() => setActiveTab('rooms')}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              border: 'none',
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+              borderRadius: '8px', border: 'none',
               backgroundColor: activeTab === 'rooms' ? '#2563eb' : 'transparent',
               color: activeTab === 'rooms' ? '#ffffff' : '#cbd5e1',
               fontWeight: activeTab === 'rooms' ? 600 : 500,
-              fontSize: '14px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'all 0.2s',
+              fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
             }}
           >
             <Home size={18} /> Phân Phòng KTX
           </button>
 
-          {/* TAB CHẤM ĐIỂM NỀ NẾP */}
           <button
             onClick={() => setActiveTab('scoring')}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              border: 'none',
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+              borderRadius: '8px', border: 'none',
               backgroundColor: activeTab === 'scoring' ? '#2563eb' : 'transparent',
               color: activeTab === 'scoring' ? '#ffffff' : '#cbd5e1',
               fontWeight: activeTab === 'scoring' ? 600 : 500,
-              fontSize: '14px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'all 0.2s',
+              fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
             }}
           >
             <ClipboardCheck size={18} /> Chấm Điểm Nề Nếp
           </button>
 
-          {/* 🌟 TAB LỊCH SỬ KHÓA HỌC */}
           <button
             onClick={() => setActiveTab('history')}
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              padding: '10px 14px',
-              borderRadius: '8px',
-              border: 'none',
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+              borderRadius: '8px', border: 'none',
               backgroundColor: activeTab === 'history' ? '#2563eb' : 'transparent',
               color: activeTab === 'history' ? '#ffffff' : '#cbd5e1',
               fontWeight: activeTab === 'history' ? 600 : 500,
-              fontSize: '14px',
-              cursor: 'pointer',
-              textAlign: 'left',
-              transition: 'all 0.2s',
+              fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
             }}
           >
             <History size={18} /> Lịch Sử Khóa Học
           </button>
 
-          {currentUser.role === 'admin' && (
+          {/* CHỈ ADMIN MỚI THẤY TAB QUẢN LÝ CÁN BỘ */}
+          {isAdmin && (
             <button
               onClick={() => setActiveTab('users')}
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                border: 'none',
+                display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+                borderRadius: '8px', border: 'none',
                 backgroundColor: activeTab === 'users' ? '#2563eb' : 'transparent',
                 color: activeTab === 'users' ? '#ffffff' : '#cbd5e1',
                 fontWeight: activeTab === 'users' ? 600 : 500,
-                fontSize: '14px',
-                cursor: 'pointer',
-                textAlign: 'left',
-                transition: 'all 0.2s',
+                fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
               }}
             >
               <UserCog size={18} /> Quản Lý Cán Bộ
@@ -184,7 +142,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* FOOTER USER & ĐĂNG XUẤT */}
       <div
         style={{
           borderTop: '1px solid #334155',
@@ -206,18 +163,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <button
           onClick={onLogout}
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            padding: '8px 12px',
-            borderRadius: '6px',
-            border: '1px solid #475569',
-            backgroundColor: 'transparent',
-            color: '#f87171',
-            fontSize: '13px',
-            fontWeight: 500,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
+            display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 12px',
+            borderRadius: '6px', border: '1px solid #475569',
+            backgroundColor: 'transparent', color: '#f87171',
+            fontSize: '13px', fontWeight: 500, cursor: 'pointer', transition: 'all 0.2s',
           }}
         >
           <LogOut size={16} /> Đăng xuất
