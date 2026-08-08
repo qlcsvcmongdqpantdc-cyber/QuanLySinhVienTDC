@@ -182,3 +182,33 @@
     border-right-color: var(--border);
   }
 }
+
+/* 1. Đảm bảo container tổng thể tự động chuyển thành dạng cột trên màn hình nhỏ */
+@media screen and (max-width: 768px) {
+  /* Nếu thẻ bọc ngoài cùng (flex container) đang đặt là row mặc định */
+  div[style*="display: flex"],
+  .app-container, 
+  #root > div {
+    flex-direction: column !important;
+    height: auto !important;
+    min-height: 100vh;
+    overflow-y: auto !important;
+  }
+
+  /* 2. Ép Sidebar co giãn theo màn hình điện thoại, không cố định chiều rộng gây tràn */
+  aside, 
+  div[class*="Sidebar"],
+  .sidebar {
+    width: 100% !important;
+    height: auto !important;
+    position: relative !important;
+  }
+
+  /* 3. Phần nội dung chính (main) chiếm trọn chiều rộng và không bị che khuất */
+  main {
+    width: 100% !important;
+    height: auto !important;
+    padding: 16px !important;
+    overflow-y: visible !important;
+  }
+}
