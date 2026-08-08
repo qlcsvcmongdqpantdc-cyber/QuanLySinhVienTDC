@@ -22,7 +22,7 @@ const HARDCODED_ADMIN: User & { can_manage?: boolean } = {
 
 export function App() {
   const [currentUser, setCurrentUser] = useState<(User & { can_manage?: boolean }) | null>(() => {
-    const savedUser = localStorage.getItem('currentUser');
+    const savedUser = sessionStorage.getItem('currentUser');
     return savedUser ? JSON.parse(savedUser) : null;
   });
 
@@ -43,7 +43,7 @@ export function App() {
         if (latestUser.can_manage !== currentUser.can_manage || latestUser.role !== currentUser.role) {
           const updated = { ...currentUser, ...latestUser };
           setCurrentUser(updated);
-          localStorage.setItem('currentUser', JSON.stringify(updated));
+          sessionStorage.setItem('currentUser', JSON.stringify(updated));
         }
       }
     }
@@ -249,13 +249,13 @@ export function App() {
     const mergedUser = found ? { ...user, ...found } : user;
 
     setCurrentUser(mergedUser);
-    localStorage.setItem('currentUser', JSON.stringify(mergedUser));
+    sessionStorage.setItem('currentUser', JSON.stringify(mergedUser));
     setActiveTab('manage');
   };
 
   const handleLogout = () => {
     setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+    sessionStorage.removeItem('currentUser');
     setStudents([]);
     setActiveTab('manage');
   };
@@ -285,7 +285,7 @@ export function App() {
       if (currentUser && String(currentUser.id) === String(userId)) {
         const updatedCurrentUser = { ...currentUser, can_manage: newStatus };
         setCurrentUser(updatedCurrentUser);
-        localStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
+        sessionStorage.setItem('currentUser', JSON.stringify(updatedCurrentUser));
       }
     } catch (err: any) {
       alert('Đã xảy ra lỗi: ' + err.message);
