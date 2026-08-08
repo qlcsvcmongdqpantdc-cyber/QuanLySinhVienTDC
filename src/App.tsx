@@ -28,12 +28,25 @@ export function App() {
 
   const [users, setUsers] = useState<(User & { can_manage?: boolean })[]>([HARDCODED_ADMIN]);
   const [students, setStudents] = useState<Student[]>([]);
-  const [activeTab, setActiveTab] = useState<string>('manage'); // Mặc định vào tab quản lý/điểm danh
+  const [activeTab, setActiveTab] = useState<string>('manage');
+  
+  // State quản lý việc đóng/mở sidebar trên mobile
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(window.innerWidth <= 768);
 
-  // Quyền quản lý đầy đủ (Thêm, sửa, xóa, điểm danh, phân phòng)
+  // Theo dõi kích thước màn hình để tự động cập nhật trạng thái mobile
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth <= 768);
+      if (window.innerWidth > 768) {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
-
-  // Quyền tối cao (Chỉ Admin mới có quyền vào Quản Lý Cán Bộ)
   const isAdmin = currentUser?.role === 'admin';
 
   useEffect(() => {
@@ -49,7 +62,6 @@ export function App() {
     }
   }, [users]);
 
-  // Điều hướng tab: Cho phép user thấy hết các tab nghiệp vụ, riêng tab 'users' chỉ Admin mới vào được
   useEffect(() => {
     if (currentUser) {
       if (activeTab === 'users' && !isAdmin) {
@@ -58,7 +70,6 @@ export function App() {
     }
   }, [currentUser, isAdmin, activeTab]);
 
-  // 1. Tải danh sách sinh viên từ CSDL Supabase
   const fetchStudentsFromSupabase = async () => {
     if (!currentUser) {
       setStudents([]);
@@ -297,15 +308,74 @@ export function App() {
   }
 
   return (
-    <div style={{ display: 'flex', height: '100vh', width: '100vw', background: '#f8fafc', overflow: 'hidden' }}>
-      <Sidebar
-        activeTab={activeTab as TabType}
-        setActiveTab={(tab) => setActiveTab(tab)}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-      />
+    <div className="app-container" style={{ display: 'flex', height: '100vh', width: '100vw', background: '#f8fafc', overflow: 'hidden', position: 'relative' }}>
+      
+      {/* 1. Nút 3 gạch (Chỉ hiển thị trên điện thoại) */}
+      {isMobile && (
+        <button 
+          onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+          style={{
+            position: 'fixed',
+            top: '12px',
+            right: '12px',
+            zIndex: 1100,
+            width: '42px',
+            height: '42px',
+            backgroundColor: '#1e293b',
+            color: '#ffffff',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '8px',
+            fontSize: '22px',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: '0 4px 10px rgba(0,0,0,0.3)'
+          }}
+        >
+          ☰
+        </button>
+      )}
 
-      <main style={{ flex: 1, padding: '32px', overflowY: 'auto', height: '100vh' }}>
+      {/* Lớp nền mờ khi mở menu trên mobile */}
+      {isMobile && isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 999
+          }}
+        />
+      )}
+
+      {/* 2. Sidebar chính tích hợp ẩn/hiện thông minh */}
+      <div 
+        className="sidebar-container"
+        style={{
+          position: isMobile ? 'fixed' : 'sticky',
+          top: 0,
+          left: isMobile ? (isSidebarOpen ? '0' : '-100%') : '0',
+          height: '100vh',
+          zIndex: 1000,
+          transition: 'left 0.3s ease-in-out',
+          boxShadow: isMobile && isSidebarOpen ? '5px 0 20px rgba(0, 0, 0, 0.4)' : undefined
+        }}
+      >
+        <Sidebar
+          activeTab={activeTab as TabType}
+          setActiveTab={(tab) => {
+            setActiveTab(tab);
+            if (isMobile) setIsSidebarOpen(false); // Chọn tab xong tự đóng menu trên điện thoại
+          }}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+        />
+      </div>
+
+      {/* 3. Phần nội dung chính */}
+      <main className="main-content" style={{ flex: 1, padding: isMobile ? '16px' : '32px', paddingTop: isMobile ? '70px' : '32px', overflowY: 'auto', height: '100vh' }}>
         {activeTab === 'add' && !canManage ? (
           <div style={{ textAlign: 'center', marginTop: '60px', padding: '24px', background: '#fff', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ color: '#d97706', marginBottom: '8px' }}>Chế độ xem dữ liệu</h2>

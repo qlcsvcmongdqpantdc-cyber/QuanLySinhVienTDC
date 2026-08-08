@@ -1,10 +1,23 @@
-/* Container chính */
+/* ==================== 0. ÉP MỞ KHÓA CUỘN CHO TOÀN BỘ TRANG ==================== */
+html, body, #root {
+  height: auto !important;
+  min-height: 100vh !important;
+  overflow: auto !important; /* Buộc trang cho phép cuộn */
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* ==================== 1. CONTAINER CHÍNH ==================== */
 .manage-students-container {
   display: flex;
   flex-direction: column;
   gap: 24px;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  padding: 24px; /* Đảm bảo có khoảng cách lề */
 }
 
 /* Header & Thống kê */
@@ -135,14 +148,17 @@
   box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.12);
 }
 
-/* Bảng danh sách hỗ trợ cuộn ngang trên Mobile */
+/* ==================== 2. BẢNG DỮ LIỆU (BẬT THANH CUỘN NGANG) ==================== */
 .table-card {
   background-color: #ffffff;
   border-radius: 16px;
   border: 1px solid #e2e8f0;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto !important; /* Bắt buộc xuất hiện thanh trượt ngang */
+  -webkit-overflow-scrolling: touch; /* Hỗ trợ vuốt mượt trên iOS/Android */
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
+  display: block !important; /* Bắt buộc để nhận diện trong không gian flex */
 }
 
 .student-table {
@@ -150,7 +166,7 @@
   border-collapse: collapse;
   text-align: left;
   font-size: 14px;
-  white-space: nowrap;
+  white-space: nowrap; /* Giữ chữ không bị bẻ dòng, ép bảng rộng ra để có thanh cuộn */
 }
 
 .student-table th {
@@ -173,27 +189,11 @@
   background-color: #f8fafc;
 }
 
-.stt-col {
-  color: #94a3b8;
-}
-
-.mssv-col {
-  font-weight: 700;
-  color: #2563eb;
-}
-
-.name-col {
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.class-col {
-  color: #475569;
-}
-
-.text-center {
-  text-align: center;
-}
+.stt-col { color: #94a3b8; }
+.mssv-col { font-weight: 700; color: #2563eb; }
+.name-col { font-weight: 600; color: #0f172a; }
+.class-col { color: #475569; }
+.text-center { text-align: center; }
 
 /* Tag Giới tính */
 .gender-tag {
@@ -202,33 +202,14 @@
   font-size: 12px;
   font-weight: 600;
 }
-
-.gender-tag.female {
-  background-color: #fdf2f8;
-  color: #db2777;
-}
-
-.gender-tag.male {
-  background-color: #eff6ff;
-  color: #2563eb;
-}
+.gender-tag.female { background-color: #fdf2f8; color: #db2777; }
+.gender-tag.male { background-color: #eff6ff; color: #2563eb; }
 
 /* Checkbox */
-.checkbox-absent {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #ef4444;
-}
+.checkbox-absent { width: 18px; height: 18px; cursor: pointer; accent-color: #ef4444; }
+.checkbox-late { width: 18px; height: 18px; cursor: pointer; accent-color: #f59e0b; }
 
-.checkbox-late {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #f59e0b;
-}
-
-/* 🌟 POPUP MODAL HIỆN ĐẠI (Glassmorphic) */
+/* ==================== 3. POPUP MODAL ==================== */
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -239,7 +220,6 @@
   background-color: rgba(15, 23, 42, 0.4);
   backdrop-filter: blur(8px);
   padding: 16px;
-  animation: fadeIn 0.2s ease-out;
   box-sizing: border-box;
 }
 
@@ -251,10 +231,10 @@
   padding: 28px;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   border: 1px solid rgba(255, 255, 255, 0.8);
-  animation: scaleUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-  box-sizing: border-box;
   max-height: 90vh;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
 }
 
 .modal-header-icon {
@@ -267,6 +247,7 @@
   justify-content: center;
   font-size: 26px;
   margin-bottom: 16px;
+  flex-shrink: 0;
 }
 
 .modal-header {
@@ -274,20 +255,11 @@
   justify-content: space-between;
   align-items: flex-start;
   margin-bottom: 20px;
+  flex-shrink: 0;
 }
 
-.modal-title {
-  font-size: 20px;
-  font-weight: 800;
-  color: #0f172a;
-  margin: 0;
-}
-
-.modal-subtitle {
-  font-size: 13px;
-  color: #64748b;
-  margin-top: 2px;
-}
+.modal-title { font-size: 20px; font-weight: 800; color: #0f172a; margin: 0; }
+.modal-subtitle { font-size: 13px; color: #64748b; margin-top: 2px; }
 
 .modal-close {
   background: #f1f5f9;
@@ -301,19 +273,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s;
   flex-shrink: 0;
-}
-
-.modal-close:hover {
-  background-color: #e2e8f0;
-  color: #0f172a;
-}
-
-.modal-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
 }
 
 .modal-warning-card {
@@ -326,6 +286,14 @@
   color: #9f1239;
   font-size: 13px;
   line-height: 1.5;
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto; /* Cho phép cuộn nội dung modal bên trong */
+  padding-right: 4px;
 }
 
 .form-group {
@@ -342,9 +310,7 @@
   letter-spacing: 0.03em;
 }
 
-.required {
-  color: #ef4444;
-}
+.required { color: #ef4444; }
 
 .form-input {
   width: 100%;
@@ -354,7 +320,6 @@
   font-size: 14px;
   outline: none;
   box-sizing: border-box;
-  transition: all 0.2s;
 }
 
 .modal-actions {
@@ -364,6 +329,7 @@
   padding-top: 16px;
   margin-top: 8px;
   border-top: 1px solid #f1f5f9;
+  flex-shrink: 0;
   flex-wrap: wrap;
 }
 
@@ -376,11 +342,6 @@
   font-size: 14px;
   cursor: pointer;
   font-weight: 600;
-  transition: background-color 0.2s;
-}
-
-.btn-cancel:hover {
-  background-color: #f8fafc;
 }
 
 .btn-delete {
@@ -393,16 +354,6 @@
   cursor: pointer;
   font-weight: 700;
   box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
-  transition: all 0.2s;
-}
-
-.btn-delete:hover:not(:disabled) {
-  background: linear-gradient(135deg, #f87171 0%, #b91c1c 100%);
-}
-
-.btn-delete:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
 }
 
 /* Animations */
@@ -412,50 +363,33 @@
 }
 
 @keyframes scaleUp {
-  from {
-    opacity: 0;
-    transform: scale(0.95) translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1) translateY(0);
-  }
+  from { opacity: 0; transform: scale(0.95) translateY(10px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
-
-/* ==================== TỐI ƯU CHO ĐIỆN THOẠI (MOBILE) ==================== */
+/* ==================== 4. TỐI ƯU RESPONSIVE MOBILE ==================== */
 @media screen and (max-width: 768px) {
   .manage-students-container {
+    padding: 12px;
     gap: 16px;
   }
 
-  .manage-header {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .manage-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .btn-end-course {
-    width: 100%;
-    justify-content: center;
-  }
-
+  .manage-header,
+  .manage-actions,
   .filter-bar {
     flex-direction: column;
-    gap: 12px;
+    align-items: stretch;
   }
 
-  .search-input {
+  .search-input,
+  .class-select,
+  .btn-end-course {
+    width: 100%;
     max-width: 100%;
   }
 
-  .class-select {
-    width: 100%;
+  .table-card {
+    border-radius: 12px;
   }
 
   .student-table th,
@@ -466,6 +400,7 @@
   .modal-card {
     padding: 20px;
     border-radius: 20px;
+    max-height: 85vh;
   }
 
   .modal-actions {
