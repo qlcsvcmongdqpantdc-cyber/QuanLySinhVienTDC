@@ -1,5 +1,5 @@
 /* ==========================================
-   1. KHUNG TỔNG THỂ SIDEBAR (MẶC ĐỊNH CHO MÁY TÍNH)
+   1. KHUNG TỔNG THỂ SIDEBAR (DÙNG CHUNG)
    ========================================== */
 .sidebar-container {
   width: 260px;
@@ -14,8 +14,12 @@
   box-sizing: border-box;
   box-shadow: 2px 0 12px rgba(0, 0, 0, 0.1);
   
-  /* Cấu hình cho hiệu ứng trượt trên mobile */
-  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Cố định bên trái màn hình trên Máy tính */
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 100;
+  transition: all 0.3s ease-in-out;
 }
 
 /* 2. HEADER BRAND */
@@ -162,63 +166,15 @@
 
 
 /* ==========================================
-   6. CẤU HÌNH RESPONSIVE CHO ĐIỆN THOẠI (< 768px)
+   6. TỐI ƯU CHO ĐIỆN THOẠI (MOBILE RESPONSIVE)
    ========================================== */
-
-/* Nút Hamburger mở menu trên mobile (Ẩn trên Desktop) */
-.sidebar-toggle-btn {
-  display: none;
-  position: fixed;
-  top: 16px;
-  left: 16px;
-  z-index: 1001;
-  background-color: #1e293b;
-  color: #ffffff;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  padding: 8px 12px;
-  border-radius: 6px;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-}
-
-/* Lớp phủ mờ nền khi mở sidebar trên mobile */
-.sidebar-overlay {
-  display: none;
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  background-color: rgba(0, 0, 0, 0.5);
-  z-index: 998;
-  backdrop-filter: blur(2px);
-}
-
 @media screen and (max-width: 768px) {
-  /* Hiện nút Toggle trên điện thoại */
-  .sidebar-toggle-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* Đưa sidebar ra khỏi luồng hiển thị chính và ẩn sang trái màn hình */
   .sidebar-container {
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 999;
-    transform: translateX(-100%); /* Ẩn hoàn toàn sang trái */
-  }
-
-  /* Khi có class active, trượt sidebar hiện ra */
-  .sidebar-container.mobile-open {
-    transform: translateX(0);
-    box-shadow: 4px 0 24px rgba(0, 0, 0, 0.4);
-  }
-
-  /* Hiện lớp phủ mờ khi menu bật */
-  .sidebar-overlay.active {
-    display: block;
+    width: 100%;       /* Tràn hết chiều ngang màn hình điện thoại */
+    min-width: 100%;
+    height: auto;      /* Chiều cao tự động theo nội dung */
+    position: relative;
+    box-shadow: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   }
 }
