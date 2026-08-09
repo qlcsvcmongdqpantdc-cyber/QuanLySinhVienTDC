@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { ClipboardCheck, Search, ShieldAlert, DoorClosed, RefreshCw, FileSpreadsheet } from 'lucide-react';
+import { ClipboardCheck, Search, ShieldAlert, DoorClosed, RefreshCw, FileSpreadsheet, Settings, Trash2, Plus } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { supabase } from '../supabaseClient';
 import type { Student } from '../types/student';
@@ -26,6 +26,13 @@ interface RecordEntry {
 
 type ScoringMap = Record<string, Record<number, RecordEntry[]>>;
 
+interface ViolationRule {
+  code: string;
+  displayCode: string;
+  label: string;
+  penalty: number;
+}
+
 interface RoomScoringProps {
   students: Student[];
   currentUser?: (User & { can_manage?: boolean }) | null;
@@ -37,6 +44,13 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
   const [scores, setScores] = useState<ScoringMap>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<boolean>(false);
+  const [violations, setViolations] = useState<ViolationRule[]>(DEFAULT_VIOLATIONS);
+  const [isViolationModalOpen, setIsViolationModalOpen] = useState<boolean>(false);
+
+  // Form thêm lỗi mới trong Modal
+  const [newCode, setNewCode] = useState<string>('');
+  const [newLabel, setNewLabel] = useState<string>('');
+  const [newPenalty, setNewPenalty] = useState<number>(1);
 
   const MAX_PER_ROOM = 12;
   const INITIAL_ROOMS = 20;
@@ -44,17 +58,11 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
   // Kiểm tra quyền quản lý
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
-  // Danh sách các lỗi
-  const [violations, setViolations] = useState(DEFAULT_VIOLATIONS);
-
-  // --- ÁP DỤNG CHUẨN LOGIC XẾP PHÒNG (LỌC VẮNG, CHIA GIỚI TÍNH & DỒN TRỄ XUỐNG CUỐI) ---
+  // --- ÁP DỤNG CHUẨN LOGIC XẾP PHÒNG ---
   const processedStudents = useMemo<ScoringStudent[]>(() => {
     if (!students || students.length === 0) return [];
 
-    // 1. Lọc bỏ sinh viên vắng mặt (isAbsent) khỏi danh sách chấm điểm
     const activeStudents = (students as ScoringStudent[]).filter((s) => !s.isAbsent);
-
-    // Kiểm tra nếu dữ liệu đầu vào đã có sẵn thông tin phòng từ trước
     const hasExistingRoom = activeStudents.some((s: ScoringStudent) => s.room || s.roomName);
     if (hasExistingRoom) {
       return activeStudents.map((st) => ({
@@ -63,70 +71,46 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       }));
     }
 
-    // 2. Chia nhóm Nữ và tách sinh viên đi trễ xuống cuối
     const females = activeStudents.filter((s) => s.gender === 'Nữ' || s.gender?.toLowerCase() === 'nu');
-    const femaleRegular = females.filter((s) => !s.isLate);
-    const femaleLate = females.filter((s) => s.isLate);
-    const sortedFemales = [...femaleRegular, ...femaleLate];
+    const sortedFemales = [...females.filter((s) => !s.isLate), ...females.filter((s) => s.isLate)];
 
-    // 3. Chia nhóm Nam và tách sinh viên đi trễ xuống cuối
     const males = activeStudents.filter((s) => s.gender !== 'Nữ' && s.gender?.toLowerCase() !== 'nu');
-    const maleRegular = males.filter((s) => !s.isLate);
-    const maleLate = males.filter((s) => s.isLate);
-    const sortedMales = [...maleRegular, ...maleLate];
+    const sortedMales = [...males.filter((s) => !s.isLate), ...males.filter((s) => s.isLate)];
 
     let totalRoomsNeeded = Math.ceil(activeStudents.length / MAX_PER_ROOM);
     if (totalRoomsNeeded < INITIAL_ROOMS) {
       totalRoomsNeeded = INITIAL_ROOMS;
     }
 
-    // Khởi tạo danh sách phòng trống
     const rooms: { roomNumber: number; students: ScoringStudent[]; genderType: string }[] = Array.from(
       { length: totalRoomsNeeded },
-      (_, i) => ({
-        roomNumber: i + 1,
-        students: [],
-        genderType: 'Trống',
-      })
+      (_, i) => ({ roomNumber: i + 1, students: [], genderType: 'Trống' })
     );
 
     let currentRoomIdx = 0;
 
     const fillGroupToRooms = (group: ScoringStudent[], gender: 'Nữ' | 'Nam') => {
       if (group.length === 0) return;
-
       if (
         rooms[currentRoomIdx].students.length > 0 &&
-        (rooms[currentRoomIdx].genderType !== gender ||
-          rooms[currentRoomIdx].students.length >= MAX_PER_ROOM)
+        (rooms[currentRoomIdx].genderType !== gender || rooms[currentRoomIdx].students.length >= MAX_PER_ROOM)
       ) {
         currentRoomIdx++;
       }
 
       for (const student of group) {
         if (currentRoomIdx >= rooms.length) {
-          rooms.push({
-            roomNumber: rooms.length + 1,
-            students: [],
-            genderType: 'Trống',
-          });
+          rooms.push({ roomNumber: rooms.length + 1, students: [], genderType: 'Trống' });
         }
-
         if (rooms[currentRoomIdx].students.length >= MAX_PER_ROOM) {
           currentRoomIdx++;
           if (currentRoomIdx >= rooms.length) {
-            rooms.push({
-              roomNumber: rooms.length + 1,
-              students: [],
-              genderType: 'Trống',
-            });
+            rooms.push({ roomNumber: rooms.length + 1, students: [], genderType: 'Trống' });
           }
         }
-
         rooms[currentRoomIdx].students.push(student);
         rooms[currentRoomIdx].genderType = gender;
       }
-
       if (rooms[currentRoomIdx].students.length > 0) {
         currentRoomIdx++;
       }
@@ -135,40 +119,55 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     fillGroupToRooms(sortedFemales, 'Nữ');
     fillGroupToRooms(sortedMales, 'Nam');
 
-    // Chuyển đổi cấu trúc mảng phòng thành danh sách sinh viên kèm tên phòng chuẩn (VD: Phòng 01, Phòng 02...)
     const result: ScoringStudent[] = [];
     rooms.forEach((r) => {
       r.students.forEach((st) => {
         const roomNumStr = r.roomNumber < 10 ? `Phòng 0${r.roomNumber}` : `Phòng ${r.roomNumber}`;
-        result.push({
-          ...st,
-          room: roomNumStr,
-        });
+        result.push({ ...st, room: roomNumStr });
       });
     });
 
     return result;
   }, [students]);
 
+  // Load danh mục lỗi và dữ liệu chấm điểm từ Supabase
   useEffect(() => {
-    const fetchScoresFromSupabase = async () => {
+    const fetchData = async () => {
       setLoading(true);
       try {
+        // 1. Tải danh mục lỗi từ bảng 'ViolationRules'
+        let currentViolations = [...DEFAULT_VIOLATIONS];
+        const { data: ruleData, error: ruleError } = await supabase.from('ViolationRules').select('*');
+        if (!ruleError && ruleData && ruleData.length > 0) {
+          const customRules = ruleData.map((r: any) => ({
+            code: r.Code,
+            displayCode: r.DisplayCode || r.Code,
+            label: r.Label || `Lỗi: ${r.Code}`,
+            penalty: Number(r.Penalty) || 1,
+          }));
+          const mapRules = new Map();
+          DEFAULT_VIOLATIONS.forEach(v => mapRules.set(v.code, v));
+          customRules.forEach(v => mapRules.set(v.code, v));
+          currentViolations = Array.from(mapRules.values());
+          setViolations(currentViolations);
+        }
+
+        // 2. Tải dữ liệu bảng 'ChamDiem'
         const { data, error } = await supabase.from('ChamDiem').select('*');
         if (error) {
-          console.error('Lỗi lấy dữ liệu:', error);
+          console.error('Lỗi lấy dữ liệu chấm điểm:', error);
           return;
         }
 
         if (data && data.length > 0) {
           const loadedScores: ScoringMap = {};
           const loadedNotes: Record<string, string> = {};
-          const extraViolationsMap = new Map<string, { code: string; displayCode: string; label: string; penalty: number }>();
 
           data.forEach((row: any) => {
             const msv = String(row.MSV);
             loadedNotes[msv] = row.GhiChu || '';
             loadedScores[msv] = {};
+
             for (let day = 1; day <= 10; day++) {
               const dayValue = row[String(day)];
               if (dayValue) {
@@ -176,18 +175,10 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
                 const dayEntries: RecordEntry[] = [];
                 codes.forEach((c) => {
                   const trimmedCode = c.trim();
-                  const target = violations.find((v) => v.code === trimmedCode || v.displayCode === trimmedCode);
+                  const target = currentViolations.find((v) => v.code === trimmedCode || v.displayCode === trimmedCode);
                   if (target) {
                     dayEntries.push({ code: target.code, displayCode: target.displayCode, penalty: target.penalty });
                   } else if (trimmedCode) {
-                    if (!extraViolationsMap.has(trimmedCode)) {
-                      extraViolationsMap.set(trimmedCode, {
-                        code: trimmedCode,
-                        displayCode: trimmedCode,
-                        label: `Tự chọn: ${trimmedCode}`,
-                        penalty: 1,
-                      });
-                    }
                     dayEntries.push({ code: trimmedCode, displayCode: trimmedCode, penalty: 1 });
                   }
                 });
@@ -195,10 +186,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
               }
             }
           });
-
-          if (extraViolationsMap.size > 0) {
-            setViolations((prev) => [...prev, ...Array.from(extraViolationsMap.values())]);
-          }
 
           setScores(loadedScores);
           setNotes(loadedNotes);
@@ -210,7 +197,7 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       }
     };
 
-    fetchScoresFromSupabase();
+    fetchData();
   }, []);
 
   const calculateFinalScore = (studentKey: string) => {
@@ -270,7 +257,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
   const handleNoteBlur = (student: ScoringStudent, newNote: string) => {
     if (!canManage) return;
-
     const studentKey = String(student.studentId || student.id);
     setNotes((prev) => ({ ...prev, [studentKey]: newNote }));
     saveToSupabase(studentKey, student.name, scores[studentKey] || '', newNote);
@@ -285,13 +271,15 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
     if (!selectedValue) return;
 
-    if (selectedValue === 'ADD_CUSTOM') {
+    if (selectedValue === 'MANAGE_RULES') {
+      setIsViolationModalOpen(true);
+    } else if (selectedValue === 'ADD_CUSTOM') {
       const codeInput = prompt('Nhập mã/ký tự lỗi tự chọn (VD: OT, VSTH...):');
       if (!codeInput || !codeInput.trim()) {
         eventTarget.value = '';
         return;
       }
-      const penaltyInput = prompt('Nhập số điểm trừ cho lỗi này (VD: 1, 1.5, 2...):', '1');
+      const penaltyInput = prompt(`Nhập số điểm trừ cho lỗi [${codeInput.trim().toUpperCase()}]:`, '1');
       const penalty = parseFloat(penaltyInput || '1');
       if (isNaN(penalty) || penalty <= 0) {
         alert('Số điểm trừ không hợp lệ!');
@@ -307,6 +295,14 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
         penalty: penalty,
       };
 
+      // Tự động lưu luôn vào database để các lần sau không bị mất
+      supabase.from('ViolationRules').upsert({
+        Code: newRule.code,
+        DisplayCode: newRule.displayCode,
+        Label: newRule.label,
+        Penalty: newRule.penalty,
+      }, { onConflict: 'Code' }).then(() => {});
+
       if (!violations.some((v) => v.code === newRule.code)) {
         setViolations((prev) => [...prev, newRule]);
       }
@@ -319,6 +315,53 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       }
     }
     eventTarget.value = '';
+  };
+
+  // Thêm lỗi mới từ Modal Quản lý
+  const handleAddRuleFromModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCode.trim()) return;
+    const formattedCode = newCode.trim().toUpperCase();
+    const rule = {
+      code: formattedCode,
+      displayCode: formattedCode,
+      label: newLabel.trim() || `Lỗi: ${formattedCode}`,
+      penalty: Number(newPenalty) || 1,
+    };
+
+    const { error } = await supabase.from('ViolationRules').upsert({
+      Code: rule.code,
+      DisplayCode: rule.displayCode,
+      Label: rule.label,
+      Penalty: rule.penalty,
+    }, { onConflict: 'Code' });
+
+    if (error) {
+      alert('Lỗi khi lưu danh mục lên cơ sở dữ liệu!');
+      return;
+    }
+
+    setViolations((prev) => {
+      const filtered = prev.filter(v => v.code !== rule.code);
+      return [...filtered, rule];
+    });
+
+    setNewCode('');
+    setNewLabel('');
+    setNewPenalty(1);
+    alert('Thêm / Cập nhật quy định lỗi thành công!');
+  };
+
+  // Xóa lỗi tùy chỉnh khỏi danh mục
+  const handleDeleteRule = async (codeToDelete: string) => {
+    if (DEFAULT_VIOLATIONS.some(v => v.code === codeToDelete)) {
+      alert('Không thể xóa các lỗi mặc định hệ thống!');
+      return;
+    }
+    if (confirm(`Bạn có chắc chắn muốn xóa quy định lỗi [${codeToDelete}] không?`)) {
+      await supabase.from('ViolationRules').delete().eq('Code', codeToDelete);
+      setViolations(prev => prev.filter(v => v.code !== codeToDelete));
+    }
   };
 
   const { roomList, roomCounts } = useMemo(() => {
@@ -425,9 +468,14 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
         <div className="header-actions">
           {canManage && (
-            <button onClick={handleExportExcel} className="btn-export" title="Xuất file Excel gồm sheet Tất cả và chia theo từng phòng">
-              <FileSpreadsheet size={16} /> Xuất Excel
-            </button>
+            <>
+              <button onClick={() => setIsViolationModalOpen(true)} className="btn-export" style={{ backgroundColor: '#4f46e5', color: '#fff' }} title="Quản lý danh mục quy định lỗi">
+                <Settings size={16} /> Quản lý danh mục lỗi
+              </button>
+              <button onClick={handleExportExcel} className="btn-export" title="Xuất file Excel gồm sheet Tất cả và chia theo từng phòng">
+                <FileSpreadsheet size={16} /> Xuất Excel
+              </button>
+            </>
           )}
 
           <div className="search-box">
@@ -531,6 +579,9 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
                                     <option value="ADD_CUSTOM" style={{ fontWeight: 'bold', color: '#2563eb' }}>
                                       ➕ Thêm lỗi...
                                     </option>
+                                    <option value="MANAGE_RULES" style={{ fontWeight: 'bold', color: '#4f46e5' }}>
+                                      ⚙️ Quản lý danh mục...
+                                    </option>
                                   </select>
                                 )}
                               </div>
@@ -592,6 +643,88 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
           </div>
         </div>
       </div>
+
+      {/* MODAL QUẢN LÝ DANH MỤC LỖI */}
+      {isViolationModalOpen && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+        }}>
+          <div style={{ backgroundColor: '#fff', padding: '24px', borderRadius: '8px', width: '500px', maxWidth: '90%', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>
+            <h3 style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Settings size={20} color="#4f46e5" /> Quản lý danh mục lỗi
+            </h3>
+
+            <form onSubmit={handleAddRuleFromModal} style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '16px', background: '#f8fafc', padding: '12px', borderRadius: '6px' }}>
+              <h4 style={{ fontSize: '14px', color: '#334155' }}>Thêm / Chỉnh sửa lỗi mới</h4>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input
+                  type="text"
+                  placeholder="Mã (VD: NHẬU)"
+                  value={newCode}
+                  onChange={(e) => setNewCode(e.target.value)}
+                  required
+                  style={{ flex: 1, padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                />
+                <input
+                  type="number"
+                  step="0.5"
+                  placeholder="Điểm trừ"
+                  value={newPenalty}
+                  onChange={(e) => setNewPenalty(parseFloat(e.target.value))}
+                  required
+                  style={{ width: '90px', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+                />
+              </div>
+              <input
+                type="text"
+                placeholder="Tên mô tả chi tiết lỗi (VD: Vi phạm quy định uống rượu bia)"
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                style={{ width: '100%', padding: '8px', border: '1px solid #cbd5e1', borderRadius: '4px' }}
+              />
+              <button type="submit" style={{ backgroundColor: '#2563eb', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+                <Plus size={16} /> Lưu quy định
+              </button>
+            </form>
+
+            <div style={{ maxHeight: '200px', overflowY: 'auto', border: '1px solid #e2e8f0', borderRadius: '4px', marginBottom: '16px' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                <thead>
+                  <tr style={{ background: '#f1f5f9', textAlign: 'left' }}>
+                    <th style={{ padding: '8px' }}>Mã</th>
+                    <th style={{ padding: '8px' }}>Mô tả</th>
+                    <th style={{ padding: '8px' }}>Điểm trừ</th>
+                    <th style={{ padding: '8px', textAlign: 'center' }}>Thao tác</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {violations.map((v) => (
+                    <tr key={v.code} style={{ borderBottom: '1px solid #f1f5f9' }}>
+                      <td style={{ padding: '8px', fontWeight: 'bold' }}>{v.code}</td>
+                      <td style={{ padding: '8px' }}>{v.label}</td>
+                      <td style={{ padding: '8px', color: '#dc2626' }}>-{v.penalty}đ</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        {!DEFAULT_VIOLATIONS.some(def => def.code === v.code) && (
+                          <button onClick={() => handleDeleteRule(v.code)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }} title="Xóa lỗi">
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={{ textAlign: 'right' }}>
+              <button onClick={() => setIsViolationModalOpen(false)} style={{ backgroundColor: '#64748b', color: '#fff', border: 'none', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer' }}>
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

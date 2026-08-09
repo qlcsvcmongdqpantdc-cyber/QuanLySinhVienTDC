@@ -15,7 +15,7 @@ interface RoomAllocationProps {
   students: Student[];
   setStudents?: React.Dispatch<React.SetStateAction<Student[]>>;
   onSetRoomLeader?: (leaderStudentId: string | null, roomStudentKeys: string[]) => void;
-  onUpdateRoomData?: (roomAssignments: { studentKey: string; roomNumber: number }[]) => void; // Thêm prop này để đồng bộ xuống DB
+  onUpdateRoomData?: (roomAssignments: { studentKey: string; roomNumber: number }[]) => void;
   currentUser?: (User & { can_manage?: boolean }) | null;
 }
 
@@ -31,9 +31,12 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   const [leaders, setLeaders] = useState<Record<number, string>>({});
   const [activeDropdownRoom, setActiveDropdownRoom] = useState<number | null>(null);
 
-  const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
+  // Ép mặc định là true nếu chưa truyền user để hiển thị nút quản lý luôn
+  const canManage = currentUser 
+    ? (currentUser.role === 'admin' || currentUser.can_manage === true) 
+    : true;
 
-  // --- THUẬT TOÁN XẮP XẾP PHÒNG (LỌC VẮNG & DỒN TRỄ XUỐNG CUỐI) ---
+  // --- THUẬT TOÁN SẮP XẾP PHÒNG ---
   const calculateRoomAllocation = (): Room[] => {
     const activeStudents = students.filter((s) => !s.isAbsent);
 
@@ -115,7 +118,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
   const rooms = calculateRoomAllocation();
 
-  // --- TỰ ĐỘNG ĐỒNG BỘ DỮ LIỆU PHÒNG XUỐNG DATABASE ---
+  // --- ĐỒNG BỘ DỮ LIỆU PHÒNG XUỐNG DB ---
   useEffect(() => {
     if (!onUpdateRoomData) return;
 
@@ -130,6 +133,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     onUpdateRoomData(assignments);
   }, [students]);
 
+  // --- TẢI TRƯỞNG PHÒNG SẴN CÓ TỪ DỮ LIỆU SINH VIÊN ---
   useEffect(() => {
     const loadedLeaders: Record<number, string> = {};
     rooms.forEach((room) => {
@@ -142,6 +146,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     setLeaders(loadedLeaders);
   }, [students]);
 
+  // --- HÀM XỬ LÝ CHỌN TRƯỞNG PHÒNG ---
   const handleSelectLeader = (roomNumber: number, studentKey: string) => {
     if (!canManage) return;
     setLeaders((prev) => ({ ...prev, [roomNumber]: studentKey }));
@@ -159,6 +164,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     }
   };
 
+  // --- HÀM XỬ LÝ HỦY TRƯỞNG PHÒNG ---
   const handleRemoveLeader = (roomNumber: number) => {
     if (!canManage) return;
     setLeaders((prev) => {
