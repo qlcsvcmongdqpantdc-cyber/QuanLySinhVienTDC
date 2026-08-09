@@ -15,12 +15,14 @@ interface RoomAllocationProps {
   students: Student[];
   setStudents?: React.Dispatch<React.SetStateAction<Student[]>>;
   onSetRoomLeader?: (leaderStudentId: string | null, roomStudentKeys: string[]) => void;
+  onUpdateRoomData?: (roomAssignments: { studentKey: string; roomNumber: number }[]) => void; // Thêm prop này để đồng bộ xuống DB
   currentUser?: (User & { can_manage?: boolean }) | null;
 }
 
 export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   students,
   onSetRoomLeader,
+  onUpdateRoomData,
   currentUser,
 }) => {
   const MAX_PER_ROOM = 12;
@@ -33,16 +35,13 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
   // --- THUẬT TOÁN XẮP XẾP PHÒNG (LỌC VẮNG & DỒN TRỄ XUỐNG CUỐI) ---
   const calculateRoomAllocation = (): Room[] => {
-    // 1. Lọc bỏ sinh viên vắng mặt (isAbsent) khỏi danh sách xếp phòng
     const activeStudents = students.filter((s) => !s.isAbsent);
 
-    // 2. Chia nhóm Nữ và tách sinh viên đi trễ xuống cuối
     const females = activeStudents.filter((s) => s.gender === 'Nữ');
     const femaleRegular = females.filter((s) => !s.isLate);
     const femaleLate = females.filter((s) => s.isLate);
     const sortedFemales = [...femaleRegular, ...femaleLate];
 
-    // 3. Chia nhóm Nam và tách sinh viên đi trễ xuống cuối
     const males = activeStudents.filter((s) => s.gender !== 'Nữ');
     const maleRegular = males.filter((s) => !s.isLate);
     const maleLate = males.filter((s) => s.isLate);
@@ -115,6 +114,21 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   };
 
   const rooms = calculateRoomAllocation();
+
+  // --- TỰ ĐỘNG ĐỒNG BỘ DỮ LIỆU PHÒNG XUỐNG DATABASE ---
+  useEffect(() => {
+    if (!onUpdateRoomData) return;
+
+    const assignments: { studentKey: string; roomNumber: number }[] = [];
+    rooms.forEach((room) => {
+      room.students.forEach((st) => {
+        const studentKey = String(st.studentId || st.id);
+        assignments.push({ studentKey, roomNumber: room.roomNumber });
+      });
+    });
+
+    onUpdateRoomData(assignments);
+  }, [students]);
 
   useEffect(() => {
     const loadedLeaders: Record<number, string> = {};
@@ -381,7 +395,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                   room.students.map((st, idx) => {
                     const studentKey = String(st.studentId || st.id);
                     const isLeader = currentLeaderKey === studentKey;
-                    const isPenalized = st.isLate; // Chỉ còn xét trễ vì vắng đã bị lọc
+                    const isPenalized = st.isLate;
 
                     return (
                       <div

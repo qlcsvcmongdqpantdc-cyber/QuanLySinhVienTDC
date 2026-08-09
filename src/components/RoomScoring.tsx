@@ -6,7 +6,7 @@ import type { Student } from '../types/student';
 import type { User } from '../types/auth';
 import './RoomScoring.css';
 
-type ScoringStudent = Student & { room?: string; roomName?: string; gender?: string; isAbsent?: boolean };
+type ScoringStudent = Student & { room?: string; roomName?: string; gender?: string; isAbsent?: boolean; isLate?: boolean };
 
 const DEFAULT_VIOLATIONS = [
   { code: 'V', displayCode: 'V', label: '1. Điểm danh: Không phép (V)', penalty: 2 },
@@ -38,20 +38,24 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState<boolean>(false);
 
+  const MAX_PER_ROOM = 12;
+  const INITIAL_ROOMS = 20;
+
   // Kiểm tra quyền quản lý
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
   // Danh sách các lỗi
   const [violations, setViolations] = useState(DEFAULT_VIOLATIONS);
 
+  // --- ÁP DỤNG CHUẨN LOGIC XẾP PHÒNG (LỌC VẮNG, CHIA GIỚI TÍNH & DỒN TRỄ XUỐNG CUỐI) ---
   const processedStudents = useMemo<ScoringStudent[]>(() => {
     if (!students || students.length === 0) return [];
 
-    // Lọc bỏ hoàn toàn các sinh viên vắng ra khỏi danh sách chấm điểm
-    const activeStudents = (students as ScoringStudent[]).filter((st) => !st.isAbsent);
+    // 1. Lọc bỏ sinh viên vắng mặt (isAbsent) khỏi danh sách chấm điểm
+    const activeStudents = (students as ScoringStudent[]).filter((s) => !s.isAbsent);
 
+    // Kiểm tra nếu dữ liệu đầu vào đã có sẵn thông tin phòng từ trước
     const hasExistingRoom = activeStudents.some((s: ScoringStudent) => s.room || s.roomName);
-
     if (hasExistingRoom) {
       return activeStudents.map((st) => ({
         ...st,
@@ -59,23 +63,88 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       }));
     }
 
-    const femaleList = activeStudents.filter(
-      (s) => s.gender?.toLowerCase() === 'nữ' || s.gender?.toLowerCase() === 'nu'
-    );
-    const maleList = activeStudents.filter(
-      (s) => s.gender?.toLowerCase() !== 'nữ' && s.gender?.toLowerCase() !== 'nu'
+    // 2. Chia nhóm Nữ và tách sinh viên đi trễ xuống cuối
+    const females = activeStudents.filter((s) => s.gender === 'Nữ' || s.gender?.toLowerCase() === 'nu');
+    const femaleRegular = females.filter((s) => !s.isLate);
+    const femaleLate = females.filter((s) => s.isLate);
+    const sortedFemales = [...femaleRegular, ...femaleLate];
+
+    // 3. Chia nhóm Nam và tách sinh viên đi trễ xuống cuối
+    const males = activeStudents.filter((s) => s.gender !== 'Nữ' && s.gender?.toLowerCase() !== 'nu');
+    const maleRegular = males.filter((s) => !s.isLate);
+    const maleLate = males.filter((s) => s.isLate);
+    const sortedMales = [...maleRegular, ...maleLate];
+
+    let totalRoomsNeeded = Math.ceil(activeStudents.length / MAX_PER_ROOM);
+    if (totalRoomsNeeded < INITIAL_ROOMS) {
+      totalRoomsNeeded = INITIAL_ROOMS;
+    }
+
+    // Khởi tạo danh sách phòng trống
+    const rooms: { roomNumber: number; students: ScoringStudent[]; genderType: string }[] = Array.from(
+      { length: totalRoomsNeeded },
+      (_, i) => ({
+        roomNumber: i + 1,
+        students: [],
+        genderType: 'Trống',
+      })
     );
 
+    let currentRoomIdx = 0;
+
+    const fillGroupToRooms = (group: ScoringStudent[], gender: 'Nữ' | 'Nam') => {
+      if (group.length === 0) return;
+
+      if (
+        rooms[currentRoomIdx].students.length > 0 &&
+        (rooms[currentRoomIdx].genderType !== gender ||
+          rooms[currentRoomIdx].students.length >= MAX_PER_ROOM)
+      ) {
+        currentRoomIdx++;
+      }
+
+      for (const student of group) {
+        if (currentRoomIdx >= rooms.length) {
+          rooms.push({
+            roomNumber: rooms.length + 1,
+            students: [],
+            genderType: 'Trống',
+          });
+        }
+
+        if (rooms[currentRoomIdx].students.length >= MAX_PER_ROOM) {
+          currentRoomIdx++;
+          if (currentRoomIdx >= rooms.length) {
+            rooms.push({
+              roomNumber: rooms.length + 1,
+              students: [],
+              genderType: 'Trống',
+            });
+          }
+        }
+
+        rooms[currentRoomIdx].students.push(student);
+        rooms[currentRoomIdx].genderType = gender;
+      }
+
+      if (rooms[currentRoomIdx].students.length > 0) {
+        currentRoomIdx++;
+      }
+    };
+
+    fillGroupToRooms(sortedFemales, 'Nữ');
+    fillGroupToRooms(sortedMales, 'Nam');
+
+    // Chuyển đổi cấu trúc mảng phòng thành danh sách sinh viên kèm tên phòng chuẩn (VD: Phòng 01, Phòng 02...)
     const result: ScoringStudent[] = [];
-    femaleList.forEach((st, idx) => {
-      const roomNum = Math.floor(idx / 12) + 1;
-      result.push({ ...st, room: `Phòng ${roomNum < 10 ? '0' + roomNum : roomNum}` });
-    });
-
-    const startMaleRoom = femaleList.length > 0 ? 2 : 1;
-    maleList.forEach((st, idx) => {
-      const roomNum = Math.floor(idx / 12) + startMaleRoom;
-      result.push({ ...st, room: `Phòng ${roomNum < 10 ? '0' + roomNum : roomNum}` });
+    rooms.forEach((r) => {
+      r.students.forEach((st) => {
+        const roomNumStr = r.roomNumber < 10 ? `Phòng 0${r.roomNumber}` : `Phòng ${r.roomNumber}`;
+        result.push({
+          ...st,
+          room: roomNumStr,
+        });
+      });
     });
 
     return result;
