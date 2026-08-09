@@ -6,7 +6,7 @@ import type { Student } from '../types/student';
 import type { User } from '../types/auth';
 import './RoomScoring.css';
 
-type ScoringStudent = Student & { room?: string; roomName?: string; gender?: string };
+type ScoringStudent = Student & { room?: string; roomName?: string; gender?: string; isAbsent?: boolean };
 
 const DEFAULT_VIOLATIONS = [
   { code: 'V', displayCode: 'V', label: '1. Điểm danh: Không phép (V)', penalty: 2 },
@@ -41,24 +41,28 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
   // Kiểm tra quyền quản lý
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
-  // Danh sách các lỗi (bao gồm lỗi mặc định và lỗi tự chọn thêm vào)
+  // Danh sách các lỗi
   const [violations, setViolations] = useState(DEFAULT_VIOLATIONS);
 
   const processedStudents = useMemo<ScoringStudent[]>(() => {
     if (!students || students.length === 0) return [];
-    const hasExistingRoom = students.some((s: ScoringStudent) => s.room || s.roomName);
+
+    // Lọc bỏ hoàn toàn các sinh viên vắng ra khỏi danh sách chấm điểm
+    const activeStudents = (students as ScoringStudent[]).filter((st) => !st.isAbsent);
+
+    const hasExistingRoom = activeStudents.some((s: ScoringStudent) => s.room || s.roomName);
 
     if (hasExistingRoom) {
-      return (students as ScoringStudent[]).map((st) => ({
+      return activeStudents.map((st) => ({
         ...st,
         room: (st.roomName || st.room || 'Phòng 01').trim(),
       }));
     }
 
-    const femaleList = (students as ScoringStudent[]).filter(
+    const femaleList = activeStudents.filter(
       (s) => s.gender?.toLowerCase() === 'nữ' || s.gender?.toLowerCase() === 'nu'
     );
-    const maleList = (students as ScoringStudent[]).filter(
+    const maleList = activeStudents.filter(
       (s) => s.gender?.toLowerCase() !== 'nữ' && s.gender?.toLowerCase() !== 'nu'
     );
 
@@ -286,7 +290,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       return;
     }
 
-    // 1. TẠO SHEET TỔNG HỢP "TẤT CẢ"
     const allStudentsData = processedStudents.map((st, idx) => {
       const studentKey = String(st.studentId || st.id || idx);
       const finalScore = calculateFinalScore(studentKey);
@@ -310,7 +313,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     const wsAll = XLSX.utils.json_to_sheet(allStudentsData);
     XLSX.utils.book_append_sheet(wb, wsAll, 'Tat_Ca');
 
-    // 2. TẠO CÁC SHEET CHI TIẾT TỪNG PHÒNG
     rooms.forEach((roomName) => {
       const roomStudents = processedStudents.filter((s) => s.room === roomName);
       const excelData = roomStudents.map((st, idx) => {
@@ -343,7 +345,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
   return (
     <div className="scoring-container">
-      {/* HEADER */}
       <div className="scoring-header">
         <div className="header-title-wrapper">
           <h2>
@@ -373,7 +374,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
         </div>
       </div>
 
-      {/* DANH SÁCH TAB PHÒNG */}
       <div className="room-tabs-container">
         {roomList.map((roomName) => {
           const isActive = selectedRoom === roomName;
@@ -392,7 +392,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       </div>
 
       <div className="main-layout">
-        {/* BẢNG CHẤM ĐIỂM */}
         <div className="table-card">
           <div className="table-responsive-wrapper">
             <table className="scoring-table">
@@ -428,12 +427,10 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
                         <td className="col-name">{st.name}</td>
                         <td className="col-room">{st.room}</td>
 
-                        {/* ĐIỂM TỔNG */}
                         <td className={`col-total-score ${finalScore < 10 ? 'score-bad' : 'score-good'}`}>
                           {finalScore}
                         </td>
 
-                        {/* 10 NGÀY CHẤM ĐIỂM */}
                         {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((day) => {
                           const dayViolations = scores[studentKey]?.[day] || [];
                           return (
@@ -472,7 +469,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
                           );
                         })}
 
-                        {/* GHI CHÚ */}
                         <td>
                           <input
                             type="text"
@@ -492,7 +488,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
           </div>
         </div>
 
-        {/* CỘT QUY ĐỊNH TRỪ ĐIỂM BÊN PHẢI */}
         <div className="rules-card">
           <h3 className="rules-title">
             <ShieldAlert size={18} color="#dc2626" /> Quy Định Trừ Điểm

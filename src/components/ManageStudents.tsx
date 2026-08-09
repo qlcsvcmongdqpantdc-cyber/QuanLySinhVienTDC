@@ -48,6 +48,9 @@ export function ManageStudents({
   const totalStudents = students.length;
   const absentCount = students.filter((s) => s.isAbsent).length;
   const lateCount = students.filter((s) => s.isLate).length;
+  
+  // 🌟 TÍNH SỐ LƯỢNG HIỆN DIỆN (TỔNG TRỪ VẮNG)
+  const presentCount = totalStudents - absentCount;
 
   // 🌟 SAO LƯU DỮ LIỆU SANG 'KhoaHocDaKetThuc' RỒI MỚI XÓA BẢNG 'DanhSachSinhVien'
   const handleConfirmEndCourse = async (e: React.FormEvent) => {
@@ -152,6 +155,7 @@ export function ManageStudents({
         {/* THỐNG KÊ & NÚT KẾT THÚC KHÓA HỌC */}
         <div className="manage-actions">
           <span className="stat-badge total">👥 Tổng: {totalStudents}</span>
+          <span className="stat-badge present" style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>✅ Hiện diện: {presentCount}</span>
           <span className="stat-badge absent">🙅 Vắng: {absentCount}</span>
           <span className="stat-badge late">⏰ Trễ: {lateCount}</span>
 
