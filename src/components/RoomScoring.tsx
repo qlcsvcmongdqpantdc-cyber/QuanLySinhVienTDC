@@ -286,6 +286,31 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       return;
     }
 
+    // 1. TẠO SHEET TỔNG HỢP "TẤT CẢ"
+    const allStudentsData = processedStudents.map((st, idx) => {
+      const studentKey = String(st.studentId || st.id || idx);
+      const finalScore = calculateFinalScore(studentKey);
+      const studentScores = scores[studentKey] || {};
+
+      const row: Record<string, any> = {
+        'STT': idx + 1,
+        'MSV': st.studentId || st.id || '',
+        'Họ và Tên': st.name || '',
+        'Phòng': st.room || '',
+        'Điểm Nề Nếp': finalScore,
+      };
+
+      for (let day = 1; day <= 10; day++) {
+        row[`Ngày ${day}`] = (studentScores[day] || []).map((e) => e.displayCode).join(', ');
+      }
+      row['Ghi chú'] = notes[studentKey] || '';
+      return row;
+    });
+
+    const wsAll = XLSX.utils.json_to_sheet(allStudentsData);
+    XLSX.utils.book_append_sheet(wb, wsAll, 'Tat_Ca');
+
+    // 2. TẠO CÁC SHEET CHI TIẾT TỪNG PHÒNG
     rooms.forEach((roomName) => {
       const roomStudents = processedStudents.filter((s) => s.room === roomName);
       const excelData = roomStudents.map((st, idx) => {
@@ -313,7 +338,7 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       XLSX.utils.book_append_sheet(wb, ws, safeSheetName);
     });
 
-    XLSX.writeFile(wb, `Cham_Diem_Ne_Nep_KTX_${new Date().toISOString().slice(0, 10)}.xlsx`);
+    XLSX.writeFile(wb, `Cham_Diem_Ne_Nep_KTX_Tat_Ca_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
   return (
@@ -330,7 +355,7 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
         <div className="header-actions">
           {canManage && (
-            <button onClick={handleExportExcel} className="btn-export" title="Xuất file Excel chia theo từng phòng">
+            <button onClick={handleExportExcel} className="btn-export" title="Xuất file Excel gồm sheet Tất cả và chia theo từng phòng">
               <FileSpreadsheet size={16} /> Xuất Excel
             </button>
           )}
