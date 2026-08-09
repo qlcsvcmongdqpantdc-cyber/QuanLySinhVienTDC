@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Home, Users, AlertTriangle, ShieldCheck, Crown, UserCheck } from 'lucide-react';
 import type { Student } from '../types/student';
+import type { User } from '../types/auth';
 import './RoomAllocation.css';
 
 interface Room {
@@ -14,34 +15,34 @@ interface RoomAllocationProps {
   students: Student[];
   setStudents?: React.Dispatch<React.SetStateAction<Student[]>>;
   onSetRoomLeader?: (leaderStudentId: string | null, roomStudentKeys: string[]) => void;
+  currentUser?: (User & { can_manage?: boolean }) | null; // Nhận thông tin user hiện tại
 }
 
 export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   students,
   onSetRoomLeader,
+  currentUser,
 }) => {
   const MAX_PER_ROOM = 12;
-  const TOTAL_ROOMS = 20;
+  const INITIAL_ROOMS = 20;
 
   const [leaders, setLeaders] = useState<Record<number, string>>({});
   const [activeDropdownRoom, setActiveDropdownRoom] = useState<number | null>(null);
 
-  // --- THUẬT TOÁN XẮP XẾP PHÒNG ---
-  const calculateRoomAllocation = (): Room[] => {
-    const normalFemales = students.filter(
-      (s) => !s.isAbsent && !s.isLate && s.gender === 'Nữ'
-    );
-    const normalMales = students.filter(
-      (s) => !s.isAbsent && !s.isLate && s.gender !== 'Nữ'
-    );
-    const penalizedFemales = students.filter(
-      (s) => (s.isAbsent || s.isLate) && s.gender === 'Nữ'
-    );
-    const penalizedMales = students.filter(
-      (s) => (s.isAbsent || s.isLate) && s.gender !== 'Nữ'
-    );
+  // Kiểm tra quyền quản lý (giống logic xuất file/thêm sinh viên hôm trước)
+  const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
-    const rooms: Room[] = Array.from({ length: TOTAL_ROOMS }, (_, i) => ({
+  // --- THUẬT TOÁN XẮP XẾP PHÒNG (TỰ ĐỘNG TĂNG PHÒNG NẾU VƯỢT QUÁ & KHÔNG DỒN PHÒNG CUỐI) ---
+  const calculateRoomAllocation = (): Room[] => {
+    const females = students.filter((s) => s.gender === 'Nữ');
+    const males = students.filter((s) => s.gender !== 'Nữ');
+
+    let totalRoomsNeeded = Math.ceil(students.length / MAX_PER_ROOM);
+    if (totalRoomsNeeded < INITIAL_ROOMS) {
+      totalRoomsNeeded = INITIAL_ROOMS;
+    }
+
+    const rooms: Room[] = Array.from({ length: totalRoomsNeeded }, (_, i) => ({
       roomNumber: i + 1,
       students: [],
       genderType: 'Trống',
@@ -50,11 +51,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
     let currentRoomIdx = 0;
 
-    const fillGroupToRooms = (
-      group: Student[],
-      gender: 'Nữ' | 'Nam',
-      isPenalizedGroup = false
-    ) => {
+    const fillGroupToRooms = (group: Student[], gender: 'Nữ' | 'Nam') => {
       if (group.length === 0) return;
 
       if (
@@ -66,16 +63,31 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       }
 
       for (const student of group) {
-        if (currentRoomIdx >= TOTAL_ROOMS) break;
+        if (currentRoomIdx >= rooms.length) {
+          rooms.push({
+            roomNumber: rooms.length + 1,
+            students: [],
+            genderType: 'Trống',
+            hasPenalized: false,
+          });
+        }
 
         if (rooms[currentRoomIdx].students.length >= MAX_PER_ROOM) {
           currentRoomIdx++;
-          if (currentRoomIdx >= TOTAL_ROOMS) break;
+          if (currentRoomIdx >= rooms.length) {
+            rooms.push({
+              roomNumber: rooms.length + 1,
+              students: [],
+              genderType: 'Trống',
+              hasPenalized: false,
+            });
+          }
         }
 
         rooms[currentRoomIdx].students.push(student);
         rooms[currentRoomIdx].genderType = gender;
-        if (isPenalizedGroup) {
+        
+        if (student.isAbsent || student.isLate) {
           rooms[currentRoomIdx].hasPenalized = true;
         }
       }
@@ -85,17 +97,14 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       }
     };
 
-    fillGroupToRooms(normalFemales, 'Nữ', false);
-    fillGroupToRooms(normalMales, 'Nam', false);
-    fillGroupToRooms(penalizedFemales, 'Nữ', true);
-    fillGroupToRooms(penalizedMales, 'Nam', true);
+    fillGroupToRooms(females, 'Nữ');
+    fillGroupToRooms(males, 'Nam');
 
     return rooms;
   };
 
   const rooms = calculateRoomAllocation();
 
-  // Đọc từ sinh viên nào đang có cột truongPhong === 'x'
   useEffect(() => {
     const loadedLeaders: Record<number, string> = {};
     rooms.forEach((room) => {
@@ -108,8 +117,8 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     setLeaders(loadedLeaders);
   }, [students]);
 
-  // Bấm chọn Trưởng phòng -> Gọi hàm đánh chữ 'x' xuống Database
   const handleSelectLeader = (roomNumber: number, studentKey: string) => {
+    if (!canManage) return;
     setLeaders((prev) => ({ ...prev, [roomNumber]: studentKey }));
     setActiveDropdownRoom(null);
 
@@ -125,8 +134,8 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     }
   };
 
-  // Bấm hủy Trưởng phòng -> Gọi hàm xóa chữ 'x' khỏi Database
   const handleRemoveLeader = (roomNumber: number) => {
+    if (!canManage) return;
     setLeaders((prev) => {
       const updated = { ...prev };
       delete updated[roomNumber];
@@ -155,10 +164,10 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       <div className="room-header">
         <div>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            Sơ Đồ Phòng KTX QPAN(20 Phòng)
+            Sơ Đồ Phòng KTX QPAN ({rooms.length} Phòng)
           </h2>
           <p>
-            Mỗi phòng 12 SV • Nữ ở các phòng đầu • Hết nữ Nam qua phòng mới • SV Vắng/Đi trễ dồn xuống phòng cuối
+            Mỗi phòng tối đa 12 SV • Sắp xếp tuần tự theo giới tính • Tự động mở rộng phòng khi vượt sĩ số
           </p>
         </div>
 
@@ -169,7 +178,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
           </div>
           <div className="stat-card warning">
             <AlertTriangle size={18} color="#dc2626" />
-            <span>Vi phạm (Phòng cuối): <strong>{totalPenalized}</strong> SV</span>
+            <span>Vi phạm/Trễ: <strong>{totalPenalized}</strong> SV</span>
           </div>
         </div>
       </div>
@@ -206,7 +215,8 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                     </span>
                   )}
 
-                  {!isEmpty && (
+                  {/* CHỈ HIỂN THỊ NÚT XÉT TRƯỞNG PHÒNG NẾU CÓ QUYỀN QUẢN LÝ VÀ PHÒNG KHÔNG TRỐNG */}
+                  {!isEmpty && canManage && (
                     <button
                       type="button"
                       onClick={() =>
@@ -242,8 +252,8 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                 </div>
               </div>
 
-              {/* DROPDOWN CHỌN TRƯỞNG PHÒNG */}
-              {isDropdownOpen && !isEmpty && (
+              {/* DROPDOWN CHỌN TRƯỞNG PHÒNG (CHỈ HIỂN THỊ KHI ĐƯỢC PHÉP MỞ) */}
+              {isDropdownOpen && !isEmpty && canManage && (
                 <div
                   style={{
                     position: 'absolute',
