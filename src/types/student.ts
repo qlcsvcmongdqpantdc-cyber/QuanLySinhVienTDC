@@ -1,16 +1,18 @@
 
 export interface Student {
-  id?: string;        // Khớp với STT
-  studentId: string; // Khớp với MSSV
-  name: string;      // Khớp với HoVaTen
-  gender?: string;   // Khớp với GioiTinh (Nam/Nữ)
-  className: string; // Khớp với Lop
-  stt?: number;        // Thêm trường STT
-  isAbsent?: boolean;  // Thêm trường Trạng thái Vắng
+  id?: string;         
+  studentId: string; 
+  name: string;      
+  gender?: string;   
+  className: string; 
+  stt?: number;        
+  isAbsent?: boolean;  
   isLate?: boolean;
+  isBorrow?: boolean;
   room?: string;
   truongPhong?: string | null;
   ghiChu?: string | null;
+  thayCo?: string | null; // <--- THÊM DÒNG NÀY VÀO
 }
 
-export type TabType = 'add' | 'manage' | 'rooms' | 'scoring' | 'history' | 'users';
+export type TabType = 'add' | 'manage' | 'rooms' | 'scoring' | 'history' | 'users' | 'borrow-list';

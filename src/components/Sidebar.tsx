@@ -6,6 +6,7 @@ import {
   ClipboardCheck,
   UserCog,
   History,
+  Package,
   LogOut,
 } from 'lucide-react';
 import type { TabType } from '../types/student';
@@ -107,6 +108,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
             }}
           >
             <ClipboardCheck size={18} /> Chấm Điểm Nề Nếp
+          </button>
+
+          <button
+            onClick={() => setActiveTab('borrow-list')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px',
+              borderRadius: '8px', border: 'none',
+              backgroundColor: activeTab === 'borrow-list' ? '#2563eb' : 'transparent',
+              color: activeTab === 'borrow-list' ? '#ffffff' : '#cbd5e1',
+              fontWeight: activeTab === 'borrow-list' ? 600 : 500,
+              fontSize: '14px', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s',
+            }}
+          >
+            <Package size={18} /> Sinh Viên Thuê Trang Phục
           </button>
 
           <button

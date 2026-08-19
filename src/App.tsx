@@ -7,6 +7,7 @@ import { ManageStudents } from './components/ManageStudents';
 import { RoomAllocation } from './components/RoomAllocation';
 import { RoomScoring } from './components/RoomScoring';
 import { CourseHistory } from './components/CourseHistory';
+import { BorrowList } from './components/BorrowList';
 import { supabase } from './supabaseClient';
 import type { Student, TabType } from './types/student';
 import type { User } from './types/auth';
@@ -91,6 +92,7 @@ export function App() {
         gender: String(item.GioiTinh || item.gender || 'Nam'),
         className: String(item.Lop || item.className || ''),
         room: item.Phong || item.TenPhong || item.room || null,
+        thayCo: item.ThayCo || item.thayCo || null, 
         isAbsent:
           item.Vang === 'x' ||
           item.Vang === '1' ||
@@ -101,6 +103,11 @@ export function App() {
           item.DiTre === '1' ||
           item.DiTre === true ||
           item.DiTre === 'true',
+        isBorrow:
+          item.MuonDo === 'x' ||
+          item.MuonDo === '1' ||
+          item.MuonDo === true ||
+          item.MuonDo === 'true',
         truongPhong: item.GhiChu === 'x' ? 'x' : null,
       }));
       setStudents(mappedStudents);
@@ -143,8 +150,10 @@ export function App() {
       GioiTinh: s.gender || 'Nam',
       Lop: s.className,
       Phong: s.room || null,
+      ThayCo: s.thayCo || null, 
       Vang: null,
       DiTre: null,
+      MuonDo: null,
       GhiChu: null,
     }));
 
@@ -157,7 +166,7 @@ export function App() {
     }
   };
 
-  const handleToggleAttendance = async (targetId: string, field: 'isAbsent' | 'isLate') => {
+  const handleToggleAttendance = async (targetId: string, field: 'isAbsent' | 'isLate' | 'isBorrow') => {
     if (!canManage) {
       alert('Bạn không có quyền thực hiện điểm danh!');
       return;
@@ -181,6 +190,8 @@ export function App() {
       updatePayload.Vang = newStatus ? 'x' : null;
     } else if (field === 'isLate') {
       updatePayload.DiTre = newStatus ? 'x' : null;
+    } else if (field === 'isBorrow') {
+      updatePayload.MuonDo = newStatus ? 'x' : null;
     }
 
     let query = supabase.from('DanhSachSinhVien').update(updatePayload);
@@ -197,6 +208,28 @@ export function App() {
     if (error) {
       alert('Không thể lưu trạng thái vào CSDL: ' + error.message);
       fetchStudentsFromSupabase();
+    }
+  };
+
+  const handleUpdateRoomData = async (roomAssignments: { studentKey: string; roomNumber: number }[]) => {
+    if (!canManage) return;
+
+    for (const item of roomAssignments) {
+      const targetStudent = students.find((s) => String(s.studentId || s.id).trim() === String(item.studentKey).trim());
+      if (!targetStudent) continue;
+
+      const mssvValue = targetStudent.studentId ? String(targetStudent.studentId).trim() : null;
+      const sttValue = targetStudent.id ? Number(targetStudent.id) : null;
+
+      let query = supabase.from('DanhSachSinhVien').update({ Phong: item.roomNumber });
+      
+      if (mssvValue && mssvValue !== 'undefined') {
+        query = query.eq('MSSV', mssvValue);
+      } else if (sttValue && !isNaN(sttValue)) {
+        query = query.eq('STT', sttValue);
+      }
+
+      await query;
     }
   };
 
@@ -367,7 +400,7 @@ export function App() {
           activeTab={activeTab as TabType}
           setActiveTab={(tab) => {
             setActiveTab(tab);
-            if (isMobile) setIsSidebarOpen(false); // Chọn tab xong tự đóng menu trên điện thoại
+            if (isMobile) setIsSidebarOpen(false);
           }}
           currentUser={currentUser}
           onLogout={handleLogout}
@@ -401,6 +434,8 @@ export function App() {
                 students={students}
                 setStudents={setStudents}
                 onSetRoomLeader={handleSetRoomLeader}
+                onUpdateRoomData={handleUpdateRoomData}
+                currentUser={currentUser}
               />
             )}
 
@@ -409,6 +444,10 @@ export function App() {
                 students={students} 
                 currentUser={currentUser} 
               />
+            )}
+
+            {activeTab === 'borrow-list' && (
+              <BorrowList students={students} />
             )}
 
             {activeTab === 'history' && (

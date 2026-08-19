@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { Upload, FileSpreadsheet, CheckCircle, Trash2, AlertCircle, Info, Lock } from 'lucide-react';
+import { Upload, FileSpreadsheet, CheckCircle, Trash2, AlertCircle, Info, Lock, UserCheck } from 'lucide-react';
+import { supabase } from '../supabaseClient'; // Đảm bảo đường dẫn đến file supabaseClient chính xác
 import type { Student } from '../types/student';
 import type { User } from '../types/auth';
 import './AddStudent.css';
@@ -19,6 +20,13 @@ interface Notification {
 export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUser }) => {
   const [parsedStudents, setParsedStudents] = useState<Student[]>([]);
   const [fileName, setFileName] = useState<string>('');
+
+  // State lưu danh sách họ tên giáo viên lấy từ cơ sở dữ liệu
+  const [teacherList, setTeacherList] = useState<string[]>([]);
+
+  // State lưu tên thầy cô chọn từ danh sách dropdown
+  const [thayCo, setThayCo] = useState<string>('');
+
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(false);
   const [notification, setNotification] = useState<Notification | null>(null);
@@ -34,6 +42,36 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
     }, 4000);
   };
 
+  // --- TỰ ĐỘNG GỌI API LẤY HỌ TÊN GIÁO VIÊN TỪ BẢNG User TRÊN SUPABASE ---
+  useEffect(() => {
+    const fetchTeachers = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('User')
+          .select('HoTen'); // Đã đổi thành 'HoTen' theo đúng tên cột trong CSDL của bạn
+
+        if (error) {
+          console.error('Lỗi khi tải danh sách giáo viên:', error);
+          showNotification('error', 'Không thể tải danh sách giáo viên từ cơ sở dữ liệu!');
+          return;
+        }
+
+        if (data) {
+          // Lọc các giá trị không bị rỗng và loại bỏ các tên bị trùng lặp
+          const names = data
+            .map((item: any) => item.HoTen) // Khớp với cột HoTen đã chọn ở trên
+            .filter((name: string) => name && name.trim() !== '');
+
+          const uniqueNames = Array.from(new Set(names)) as string[];
+          setTeacherList(uniqueNames);
+        }
+      } catch (err) {
+        console.error('Lỗi kết nối:', err);
+      }
+    };
+
+    fetchTeachers();
+  }, []);
   const processExcelFile = (file: File) => {
     if (!canManage) {
       showNotification('error', 'Bạn không có quyền thực hiện thao tác này!');
@@ -117,6 +155,7 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
               className: className,
               isAbsent: false,
               isLate: false,
+              thayCo: thayCo.trim() || null,
             });
           }
         });
@@ -186,13 +225,19 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
       return;
     }
     if (parsedStudents.length === 0) return;
-    
+
     setLoading(true);
     try {
-      await onAddStudents(parsedStudents);
+      const studentsWithThayCo = parsedStudents.map(st => ({
+        ...st,
+        thayCo: thayCo.trim() || null
+      }));
+
+      await onAddStudents(studentsWithThayCo);
       showNotification('success', 'Đã lưu danh sách sinh viên vào CSDL thành công!');
       setParsedStudents([]);
       setFileName('');
+      setThayCo('');
     } catch (err: any) {
       showNotification('error', 'Lỗi khi lưu vào CSDL: ' + (err.message || 'Lỗi không xác định'));
     } finally {
@@ -220,21 +265,20 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
               notification.type === 'success'
                 ? '#f0fdf4'
                 : notification.type === 'error'
-                ? '#fef2f2'
-                : '#eff6ff',
-            border: `1px solid ${
-              notification.type === 'success'
+                  ? '#fef2f2'
+                  : '#eff6ff',
+            border: `1px solid ${notification.type === 'success'
                 ? '#bbf7d0'
                 : notification.type === 'error'
-                ? '#fecaca'
-                : '#bfdbfe'
-            }`,
+                  ? '#fecaca'
+                  : '#bfdbfe'
+              }`,
             color:
               notification.type === 'success'
                 ? '#166534'
                 : notification.type === 'error'
-                ? '#991b1b'
-                : '#1e40af',
+                  ? '#991b1b'
+                  : '#1e40af',
             animation: 'fadeInOut 0.3s ease-in-out',
             fontWeight: '600',
             fontSize: '14px',
@@ -303,7 +347,7 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
                 <div className="actions">
                   <button
                     className="btn-cancel"
-                    onClick={() => { setParsedStudents([]); setFileName(''); }}
+                    onClick={() => { setParsedStudents([]); setFileName(''); setThayCo(''); }}
                     disabled={loading}
                   >
                     <Trash2 size={16} /> Hủy
@@ -318,6 +362,51 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
                 </div>
               </div>
 
+              {/* Ô CHỌN TÊN THẦY CÔ LẤY TỪ DATABASE (SELECT) */}
+              <div style={{
+                background: '#f8fafc',
+                padding: '14px 18px',
+                borderRadius: '8px',
+                border: '1px solid #cbd5e1',
+                margin: '16px 0',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px'
+              }}>
+                <UserCheck size={20} color="#2563eb" />
+                <div style={{ flex: 1 }}>
+                  <label style={{ display: 'block', fontSize: '12px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
+                    Chọn Thầy / Cô phụ trách (Lấy từ bảng User):
+                  </label>
+                  <select
+                    value={thayCo}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setThayCo(val);
+                      setParsedStudents(prev => prev.map(item => ({ ...item, thayCo: val.trim() || null })));
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '8px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid #94a3b8',
+                      outline: 'none',
+                      fontSize: '14px',
+                      boxSizing: 'border-box',
+                      background: '#ffffff',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    <option value="">-- Chọn Thầy/Cô phụ trách từ CSDL --</option>
+                    {teacherList.map((name, index) => (
+                      <option key={index} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
               <div className="table-wrapper">
                 <table className="excel-table">
                   <thead>
@@ -327,6 +416,7 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
                       <th>Họ và tên</th>
                       <th>Giới tính</th>
                       <th>Lớp</th>
+                      <th>Thầy/Cô</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -341,6 +431,7 @@ export const AddStudent: React.FC<AddStudentProps> = ({ onAddStudents, currentUs
                           </span>
                         </td>
                         <td>{st.className}</td>
+                        <td><span style={{ color: '#2563eb', fontWeight: '500' }}>{st.thayCo || thayCo || '(Trống)'}</span></td>
                       </tr>
                     ))}
                   </tbody>

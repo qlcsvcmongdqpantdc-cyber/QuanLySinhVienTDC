@@ -6,7 +6,7 @@ import './ManageStudents.css';
 
 interface ManageStudentsProps {
   students: Student[];
-  onToggleAttendance: (targetId: string, field: 'isAbsent' | 'isLate') => void;
+  onToggleAttendance: (targetId: string, field: 'isAbsent' | 'isLate' | 'isBorrow') => void;
   onRefresh?: () => void;
   currentUser?: (User & { can_manage?: boolean }) | null;
 }
@@ -19,6 +19,7 @@ export function ManageStudents({
 }: ManageStudentsProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedClass, setSelectedClass] = useState('all');
+  const [selectedTeacher, setSelectedTeacher] = useState('all');
 
   // Kiểm tra quyền quản lý
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
@@ -33,21 +34,24 @@ export function ManageStudents({
   // State Modal Thông báo thành công
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-  // Danh sách Lớp
+  // Danh sách Lớp và danh sách Thầy/Cô
   const classes = Array.from(new Set(students.map((s) => s.className))).filter(Boolean);
+  const teachers = Array.from(new Set(students.map((s) => s.thayCo))).filter(Boolean);
 
-  // Lọc sinh viên
+  // Lọc sinh viên theo từ khóa, lớp và thầy cô
   const filteredStudents = students.filter((student) => {
     const matchSearch =
       student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       student.studentId.toLowerCase().includes(searchTerm.toLowerCase());
     const matchClass = selectedClass === 'all' || student.className === selectedClass;
-    return matchSearch && matchClass;
+    const matchTeacher = selectedTeacher === 'all' || student.thayCo === selectedTeacher;
+    return matchSearch && matchClass && matchTeacher;
   });
 
   const totalStudents = students.length;
   const absentCount = students.filter((s) => s.isAbsent).length;
   const lateCount = students.filter((s) => s.isLate).length;
+  const borrowCount = students.filter((s: any) => s.isBorrow).length;
   
   // 🌟 TÍNH SỐ LƯỢNG HIỆN DIỆN (TỔNG TRỪ VẮNG)
   const presentCount = totalStudents - absentCount;
@@ -89,6 +93,7 @@ export function ManageStudents({
           Phong: s.Phong || s.TenPhong || s.room || null,
           Vang: s.Vang ? String(s.Vang) : null,
           DiTre: s.DiTre ? String(s.DiTre) : null,
+          MuonDo: s.MuonDo ? String(s.MuonDo) : null,
           TruongPhong: s.TruongPhong ? String(s.TruongPhong) : null,
         }));
 
@@ -148,7 +153,7 @@ export function ManageStudents({
         <div>
           <h1 className="manage-title">Quản Lý Điểm Danh & Vi Phạm</h1>
           <p className="manage-subtitle">
-            Tích vắng/đi trễ để tự động chuyển sinh viên xuống các phòng cuối
+            Tích vắng/đi trễ/mượn đồ để cập nhật trực tiếp lên hệ thống
           </p>
         </div>
 
@@ -158,6 +163,7 @@ export function ManageStudents({
           <span className="stat-badge present" style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>✅ Hiện diện: {presentCount}</span>
           <span className="stat-badge absent">🙅 Vắng: {absentCount}</span>
           <span className="stat-badge late">⏰ Trễ: {lateCount}</span>
+          <span className="stat-badge borrow" style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>📦 Mượn đồ: {borrowCount}</span>
 
           {canManage && (
             <button onClick={() => setIsModalOpen(true)} className="btn-end-course">
@@ -176,6 +182,19 @@ export function ManageStudents({
           onChange={(e) => setSearchTerm(e.target.value)}
           className="search-input"
         />
+
+        <select
+          value={selectedTeacher}
+          onChange={(e) => setSelectedTeacher(e.target.value)}
+          className="class-select"
+        >
+          <option value="all">Tất cả giáo viên</option>
+          {teachers.map((t) => (
+            <option key={t || ''} value={t || ''}>
+              {t || 'Trống'}
+            </option>
+          ))}
+        </select>
 
         <select
           value={selectedClass}
@@ -201,51 +220,67 @@ export function ManageStudents({
               <th>HỌ VÀ TÊN</th>
               <th>GIỚI TÍNH</th>
               <th>LỚP</th>
+              <th>THÀY/CÔ</th>
               <th className="text-center">TÍCH VẮNG</th>
               <th className="text-center">TÍCH ĐI TRỄ</th>
+              <th className="text-center">MƯỢN ĐỒ</th>
             </tr>
           </thead>
           <tbody>
             {filteredStudents.length === 0 ? (
               <tr>
-                <td colSpan={7} className="text-center" style={{ padding: '32px', color: '#94a3b8' }}>
+                <td colSpan={9} className="text-center" style={{ padding: '32px', color: '#94a3b8' }}>
                   Không tìm thấy sinh viên nào trong danh sách.
                 </td>
               </tr>
             ) : (
-              filteredStudents.map((student, index) => (
-                <tr key={student.id || student.studentId}>
-                  <td className="stt-col">{index + 1}</td>
-                  <td className="mssv-col">{student.studentId}</td>
-                  <td className="name-col">{student.name}</td>
-                  <td>
-                    <span className={`gender-tag ${student.gender === 'Nữ' ? 'female' : 'male'}`}>
-                      {student.gender}
-                    </span>
-                  </td>
-                  <td className="class-col">{student.className}</td>
-                  <td className="text-center">
-                    <input
-                      type="checkbox"
-                      checked={student.isAbsent || false}
-                      disabled={!canManage}
-                      onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isAbsent')}
-                      className="checkbox-absent"
-                      style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
-                    />
-                  </td>
-                  <td className="text-center">
-                    <input
-                      type="checkbox"
-                      checked={student.isLate || false}
-                      disabled={!canManage}
-                      onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isLate')}
-                      className="checkbox-late"
-                      style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
-                    />
-                  </td>
-                </tr>
-              ))
+              filteredStudents.map((student, index) => {
+                const sAny = student as any;
+                return (
+                  <tr key={student.id || student.studentId}>
+                    <td className="stt-col">{index + 1}</td>
+                    <td className="mssv-col">{student.studentId}</td>
+                    <td className="name-col">{student.name}</td>
+                    <td>
+                      <span className={`gender-tag ${student.gender === 'Nữ' ? 'female' : 'male'}`}>
+                        {student.gender}
+                      </span>
+                    </td>
+                    <td className="class-col">{student.className}</td>
+                    <td className="teacher-col" style={{ color: '#2563eb', fontWeight: 500 }}>{student.thayCo || '(Trống)'}</td>
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={student.isAbsent || false}
+                        disabled={!canManage}
+                        onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isAbsent')}
+                        className="checkbox-absent"
+                        style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
+                      />
+                    </td>
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={student.isLate || false}
+                        disabled={!canManage}
+                        onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isLate')}
+                        className="checkbox-late"
+                        style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
+                      />
+                    </td>
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        checked={sAny.isBorrow || false}
+                        disabled={!canManage}
+                        onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isBorrow')}
+                        className="checkbox-borrow"
+                        style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
+                      />
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
