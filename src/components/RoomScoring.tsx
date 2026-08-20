@@ -52,12 +52,15 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
   const [newLabel, setNewLabel] = useState<string>('');
   const [newPenalty, setNewPenalty] = useState<number>(1);
 
+  // --- PHÂN TRANG HIỂN THỊ ĐỂ CHỐNG LAG DOM ---
+  const [page, setPage] = useState<number>(1);
+  const ITEMS_PER_PAGE = 30;
+
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
-  // --- LẤY TRỰC TIẾP TỪ CỘT 'Phong' VÀ 'ThayCo' CỦA BẢNG DanhSachSinhVien ---
+  // --- LẤY DỮ LIỆU TỪ CỘT 'Phong' VÀ 'ThayCo' ---
   const processedStudents = useMemo<ScoringStudent[]>(() => {
     if (!students || students.length === 0) return [];
-
     const activeStudents = (students as ScoringStudent[]).filter((s) => !s.isAbsent);
 
     return activeStudents.map((st) => ({
@@ -134,6 +137,30 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     fetchData();
   }, []);
 
+  // --- TỐI ƯU HÓA LỌC BẰNG USEMEMO ---
+  const filteredStudents = useMemo(() => {
+    return processedStudents.filter((s) => {
+      const roomMatch = selectedRoom === 'Tất cả' || s.room === selectedRoom;
+      const teacherName = (s.thayCo || '').trim();
+      const teacherMatch = selectedTeacher === 'Tất cả' || teacherName === selectedTeacher;
+      
+      const search = searchTerm.toLowerCase().trim();
+      const searchMatch = !search || s.name.toLowerCase().includes(search) || (s.studentId && s.studentId.toLowerCase().includes(search));
+      
+      return roomMatch && teacherMatch && searchMatch;
+    });
+  }, [processedStudents, selectedRoom, selectedTeacher, searchTerm]);
+
+  // Reset trang về 1 mỗi khi đổi bộ lọc
+  useEffect(() => {
+    setPage(1);
+  }, [selectedRoom, selectedTeacher, searchTerm]);
+
+  // Danh sách hiển thị theo trang để chống lag
+  const displayedStudents = useMemo(() => {
+    return filteredStudents.slice(0, page * ITEMS_PER_PAGE);
+  }, [filteredStudents, page]);
+
   const calculateFinalScore = (studentKey: string) => {
     const studentData = scores[studentKey];
     if (!studentData) return 10;
@@ -167,7 +194,7 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
       recordPayload[String(day)] = dayViolations.map((v) => v.displayCode).join(',') || null;
     }
 
-    await supabase.from('ChamDiem').upsert(recordPayload, { onConflict: 'MSV' });
+    supabase.from('ChamDiem').upsert(recordPayload, { onConflict: 'MSV' }).then(() => {});
   };
 
   const handleToggleViolation = (student: ScoringStudent, day: number, code: string, displayCode: string, penalty: number) => {
@@ -295,7 +322,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     }
   };
 
-  // --- DANH SÁCH PHÒNG ĐỂ LỌC ---
   const roomList = useMemo(() => {
     const rooms = new Set<string>();
     processedStudents.forEach((s) => {
@@ -304,7 +330,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     return ['Tất cả', ...Array.from(rooms).sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))];
   }, [processedStudents]);
 
-  // --- DANH SÁCH THẦY CÔ ĐỂ LỌC ---
   const teacherList = useMemo(() => {
     const teachers = new Set<string>();
     processedStudents.forEach((s) => {
@@ -314,20 +339,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     return ['Tất cả', ...Array.from(teachers).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))];
   }, [processedStudents]);
 
-  // --- LỌC SINH VIÊN THEO CẢ PHÒNG, THẦY CÔ VÀ TỪ KHÓA ---
-  const filteredStudents = useMemo(() => {
-    return processedStudents.filter((s) => {
-      const roomMatch = selectedRoom === 'Tất cả' || s.room === selectedRoom;
-      const teacherName = (s.thayCo || '').trim();
-      const teacherMatch = selectedTeacher === 'Tất cả' || teacherName === selectedTeacher;
-      
-      const search = searchTerm.toLowerCase().trim();
-      const searchMatch = !search || s.name.toLowerCase().includes(search) || (s.studentId && s.studentId.toLowerCase().includes(search));
-      
-      return roomMatch && teacherMatch && searchMatch;
-    });
-  }, [processedStudents, selectedRoom, selectedTeacher, searchTerm]);
-
   const handleExportExcel = () => {
     if (!processedStudents || processedStudents.length === 0) {
       alert('Không có dữ liệu sinh viên để xuất Excel!');
@@ -336,7 +347,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
     const wb = XLSX.utils.book_new();
 
-    // 1. Xuất sheet tổng hợp tất cả sinh viên
     const allStudentsData = processedStudents.map((st, idx) => {
       const studentKey = String(st.studentId || st.id || idx);
       const finalScore = calculateFinalScore(studentKey);
@@ -361,7 +371,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
     const wsAll = XLSX.utils.json_to_sheet(allStudentsData);
     XLSX.utils.book_append_sheet(wb, wsAll, 'Tat_Ca');
 
-    // 2. Logic tách sheet theo từng phòng
     const rooms = roomList.filter(r => r !== 'Tất cả');
 
     rooms.forEach((roomName) => {
@@ -390,14 +399,11 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
         });
 
         const wsRoom = XLSX.utils.json_to_sheet(roomData);
-        
-        // Đặt tên sheet an toàn (giới hạn 31 ký tự, loại bỏ ký tự đặc biệt của Excel)
         const safeSheetName = `Phong_${roomName}`.replace(/[\/\\?\*:[\]]/g, '_').substring(0, 31);
         XLSX.utils.book_append_sheet(wb, wsRoom, safeSheetName);
       }
     });
 
-    // 3. Tải file Excel về máy
     XLSX.writeFile(wb, `Cham_Diem_Ne_Nep_KTX_${new Date().toISOString().slice(0, 10)}.xlsx`);
   };
 
@@ -439,7 +445,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
       {/* BỘ LỌC CHỌN PHÒNG VÀ GIẢNG VIÊN */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
-        {/* Tab Phòng */}
         <div className="room-tabs-container" style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
           <span style={{ alignSelf: 'center', fontWeight: 'bold', fontSize: '13px', color: '#475569', marginRight: '4px' }}>Phòng:</span>
           {roomList.map((roomName) => {
@@ -456,7 +461,6 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
           })}
         </div>
 
-        {/* Dropdown chọn Giảng viên */}
         {teacherList.length > 1 && (
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#fff', padding: '10px 14px', borderRadius: '8px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', width: 'fit-content' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600, fontSize: '13px', color: '#475569' }}>
@@ -514,7 +518,7 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
                     </td>
                   </tr>
                 ) : (
-                  filteredStudents.map((st, idx) => {
+                  displayedStudents.map((st, idx) => {
                     const studentKey = String(st.studentId || st.id || idx);
                     const finalScore = calculateFinalScore(studentKey);
 
@@ -588,6 +592,27 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
               </tbody>
             </table>
           </div>
+
+          {/* THANH PHÂN TRANG / XEM THÊM */}
+          {displayedStudents.length < filteredStudents.length && (
+            <div style={{ textAlign: 'center', padding: '16px' }}>
+              <button
+                onClick={() => setPage(p => p + 1)}
+                style={{
+                  backgroundColor: '#2563eb',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '8px 20px',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '13px'
+                }}
+              >
+                Xem thêm sinh viên ({displayedStudents.length}/{filteredStudents.length})
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="rules-card">
