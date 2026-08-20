@@ -76,19 +76,34 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     ? (currentUser.role === 'admin' || currentUser.can_manage === true) 
     : true;
 
-  // --- THUẬT TOÁN SẮP XẾP PHÒNG ---
+  // --- THUẬT TOÁN SẮP XẾP PHÒNG (Đã tích hợp sắp xếp nhóm trễ + MSSV chuẩn xác) ---
   const calculateRoomAllocation = (): Room[] => {
     const activeStudents = students.filter((s) => !s.isAbsent);
 
-    const females = activeStudents.filter((s) => s.gender === 'Nữ');
-    const femaleRegular = females.filter((s) => !s.isLate);
-    const femaleLate = females.filter((s) => s.isLate);
-    const sortedFemales = [...femaleRegular, ...femaleLate];
+    const sortWithinGender = (group: Student[]) => {
+      const regular = group.filter((s) => !s.isLate);
+      const late = group
+        .filter((s) => s.isLate)
+        .sort((a, b) => {
+          const timeA = a.late_at ? new Date(a.late_at).getTime() : 0;
+          const timeB = b.late_at ? new Date(b.late_at).getTime() : 0;
 
-    const males = activeStudents.filter((s) => s.gender !== 'Nữ');
-    const maleRegular = males.filter((s) => !s.isLate);
-    const maleLate = males.filter((s) => s.isLate);
-    const sortedMales = [...maleRegular, ...maleLate];
+          // 1. Sắp xếp theo thời gian trễ tăng dần
+          if (timeA !== timeB) {
+            return timeA - timeB;
+          }
+
+          // 2. Nếu cùng thời gian trễ, sắp xếp theo MSSV tăng dần để tránh dồn ứ ngẫu nhiên
+          const idA = String(a.studentId || a.id || '');
+          const idB = String(b.studentId || b.id || '');
+          return idA.localeCompare(idB);
+        });
+
+      return [...regular, ...late];
+    };
+
+    const sortedFemales = sortWithinGender(activeStudents.filter((s) => s.gender === 'Nữ'));
+    const sortedMales = sortWithinGender(activeStudents.filter((s) => s.gender !== 'Nữ'));
 
     let totalRoomsNeeded = Math.ceil(activeStudents.length / MAX_PER_ROOM);
     if (totalRoomsNeeded < INITIAL_ROOMS) {
