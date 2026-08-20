@@ -58,15 +58,15 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
 
   const canManage = currentUser?.role === 'admin' || currentUser?.can_manage === true;
 
-  // --- LẤY DỮ LIỆU TỪ CỘT 'Phong' VÀ 'ThayCo' ---
+  // --- LẤY DỮ LIỆU TỪ CỘT 'Phong' VÀ 'ThayCo' (Đã fix quét đa dạng tên thuộc tính) ---
   const processedStudents = useMemo<ScoringStudent[]>(() => {
     if (!students || students.length === 0) return [];
     const activeStudents = (students as ScoringStudent[]).filter((s) => !s.isAbsent);
 
-    return activeStudents.map((st) => ({
+    return activeStudents.map((st: any) => ({
       ...st,
-      room: (st.Phong ?? st.roomName ?? st.room ?? 'Chưa phân phòng').toString().trim(),
-      thayCo: (st.ThayCo ?? st.thayCo ?? st.teacher ?? 'Chưa phân công').toString().trim(),
+      room: (st.Phong ?? st.phong ?? st.roomName ?? st.room ?? st['Phòng'] ?? 'Chưa phân phòng').toString().trim(),
+      thayCo: (st.ThayCo ?? st.thayco ?? st.thayCo ?? st.teacher ?? st['Giảng viên'] ?? 'Chưa phân công').toString().trim(),
     }));
   }, [students]);
 
@@ -714,7 +714,7 @@ export const RoomScoring: React.FC<RoomScoringProps> = ({ students = [], current
                       <td style={{ padding: '8px', textAlign: 'center' }}>
                         {!DEFAULT_VIOLATIONS.some(def => def.code === v.code) && (
                           <button onClick={() => handleDeleteRule(v.code)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444' }} title="Xóa lỗi">
-                            <Trash2 size={16} />
+                            <Trash2 size= {16} />
                           </button>
                         )}
                       </td>
