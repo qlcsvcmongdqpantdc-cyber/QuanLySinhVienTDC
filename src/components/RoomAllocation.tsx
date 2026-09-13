@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { Home, Users, AlertTriangle, Crown, UserCheck, Filter, Lock, Unlock, UserX, AlertCircle } from 'lucide-react';
+import { Home, Users, AlertTriangle, Crown, UserCheck, Filter, Lock, Unlock, UserX, AlertCircle, User, UserPlus, CheckCircle } from 'lucide-react';
 import type { Student } from '../types/student';
-import type { User } from '../types/auth';
+import type { User as AuthUser } from '../types/auth';
 import { supabase } from '../supabaseClient';
 import './RoomAllocation.css';
 
@@ -19,7 +19,7 @@ interface RoomAllocationProps {
   setStudents?: React.Dispatch<React.SetStateAction<Student[]>>;
   onSetRoomLeader?: (leaderStudentId: string | null, roomStudentKeys: string[]) => void;
   onUpdateRoomData?: (roomAssignments: { studentKey: string; roomNumber: number }[]) => void;
-  currentUser?: (User & { can_manage?: boolean }) | null;
+  currentUser?: (AuthUser & { can_manage?: boolean }) | null;
 }
 
 export const RoomAllocation: React.FC<RoomAllocationProps> = ({
@@ -34,13 +34,23 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
   const [leaders, setLeaders] = useState<Record<number, string>>({});
   const [activeDropdownRoom, setActiveDropdownRoom] = useState<number | null>(null);
-  
+
   const [teacherList, setTeacherList] = useState<string[]>([]);
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<string>('');
 
-  // State quản lý Modal xác nhận xóa sinh viên đẹp hơn
   const [studentToDelete, setStudentToDelete] = useState<Student | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [isSavingRooms, setIsSavingRooms] = useState<boolean>(false);
+
+  // Trạng thái thông báo / Toast nhỏ tùy chỉnh thay cho alert() thô
+  const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage({ text, type });
+    setTimeout(() => {
+      setToastMessage(null);
+    }, 3500);
+  };
 
   const [isRoomLocked, setIsRoomLocked] = useState<boolean>(() => {
     const savedLock = localStorage.getItem('KTX_IS_ROOM_LOCKED');
@@ -95,15 +105,15 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   }, []);
 
   const canManage = useMemo(() => {
-    return currentUser 
-      ? (currentUser.role === 'admin' || currentUser.can_manage === true) 
+    return currentUser
+      ? (currentUser.role === 'admin' || currentUser.can_manage === true)
       : true;
   }, [currentUser]);
 
   const calculateRoomAllocation = useCallback((): Room[] => {
     const allValidStudents = students.filter((s: any) => {
-      if (s.isAbsent) return false;
-      return true; 
+      if (s.isAbsent || s.Vang === 'x') return false;
+      return true;
     });
 
     const sortWithinGender = (group: Student[]) => {
@@ -111,14 +121,17 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       const late = group
         .filter((s) => s.isLate)
         .sort((a, b) => {
-          const timeA = a.late_at ? new Date(a.late_at).getTime() : 0;
-          const timeB = b.late_at ? new Date(b.late_at).getTime() : 0;
+          const rawA = a.late_at || (a as any).late_at;
+          const rawB = b.late_at || (b as any).late_at;
+
+          const timeA = rawA ? new Date(String(rawA).replace(' ', 'T')).getTime() : 0;
+          const timeB = rawB ? new Date(String(rawB).replace(' ', 'T')).getTime() : 0;
 
           if (timeA !== timeB) return timeA - timeB;
 
-          const idA = String(a.MSSV || a.id || '');
-          const idB = String(b.MSSV || b.id || '');
-          return idA.localeCompare(idB);
+          const nameA = String(a.name || '');
+          const nameB = String(b.name || '');
+          return nameA.localeCompare(nameB, 'vi', { sensitivity: 'accent' });
         });
 
       return [...regular, ...late];
@@ -176,7 +189,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
         rooms[currentRoomIdx].students.push(student);
         rooms[currentRoomIdx].genderType = gender;
-        
+
         if (student.isLate) {
           rooms[currentRoomIdx].hasPenalized = true;
         }
@@ -216,7 +229,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
           if (data.isLocked === true) {
             setIsRoomLocked(true);
             localStorage.setItem('KTX_IS_ROOM_LOCKED', 'true');
-            
+
             setLockedRoomsData(prev => {
               if (!prev) {
                 const newLockedState = calculateRoomAllocation();
@@ -245,8 +258,37 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     };
   }, [students.length, calculateRoomAllocation]);
 
-  // Hàm thực hiện xóa sinh viên sau khi bấm nút Đồng ý trên Modal
-  const confirmDeleteStudent = async () => {
+  const handleConfirmAndSaveRooms = async () => {
+    if (!canManage) return;
+    setIsSavingRooms(true);
+
+    try {
+      for (const room of rooms) {
+        for (const st of room.students) {
+          const mssvValue = st.MSSV || (st as any).studentId || st.id;
+          if (mssvValue) {
+            const { error } = await supabase
+              .from('DanhSachSinhVien')
+              .update({ phong: room.roomNumber })
+              .eq('MSSV', mssvValue);
+
+            if (error) {
+              console.error(`Lỗi cập nhật phòng cho MSSV ${mssvValue}:`, error.message);
+            }
+          }
+        }
+      }
+
+      showToast('Đã xác nhận và lưu sơ đồ phòng lên hệ thống thành công!', 'success');
+    } catch (err: any) {
+      console.error('Lỗi kết nối khi lưu phòng:', err);
+      showToast('Lỗi khi lưu phòng: ' + (err.message || err), 'error');
+    } finally {
+      setIsSavingRooms(false);
+    }
+  };
+
+  const confirmMarkAbsent = async () => {
     if (!studentToDelete || !canManage) return;
 
     setIsDeleting(true);
@@ -257,26 +299,30 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
       const { error } = await supabase
         .from('DanhSachSinhVien')
-        .delete()
+        .update({ Vang: 'x' })
         .eq('MSSV', mssvValue);
 
       if (error) {
-        console.error('Lỗi xóa sinh viên từ Supabase:', error.message);
-        alert('Lỗi khi xóa khỏi CSDL: ' + error.message);
+        console.error('Lỗi cập nhật vắng trong Supabase:', error.message);
+        showToast('Lỗi cập nhật CSDL: ' + error.message, 'error');
         setIsDeleting(false);
         return;
       }
     } catch (err) {
       console.error('Lỗi kết nối:', err);
+      showToast('Lỗi kết nối mạng.', 'error');
       setIsDeleting(false);
       return;
     }
 
     if (setStudents) {
       setStudents((prevStudents) =>
-        prevStudents.filter((s) => {
+        prevStudents.map((s) => {
           const sKey = String(s.MSSV || (s as any).studentId || s.id);
-          return sKey !== studentKey;
+          if (sKey === studentKey) {
+            return { ...s, isAbsent: true, Vang: 'x' };
+          }
+          return s;
         })
       );
     }
@@ -295,6 +341,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
     setIsDeleting(false);
     setStudentToDelete(null);
+    showToast(`Đã đánh dấu vắng cho sinh viên ${studentToDelete.name}.`, 'success');
   };
 
   const toggleLockRooms = async () => {
@@ -310,6 +357,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
       try {
         await supabase.from('RoomConfig').upsert({ id: 1, isLocked: true });
+        showToast('Đã khóa cố định sơ đồ phòng thành công.', 'success');
       } catch (err) {
         console.error('Lỗi kết nối:', err);
       }
@@ -322,6 +370,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
       try {
         await supabase.from('RoomConfig').upsert({ id: 1, isLocked: false });
+        showToast('Đã mở khóa sơ đồ phòng.', 'success');
       } catch (err) {
         console.error('Lỗi kết nối:', err);
       }
@@ -337,10 +386,13 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       ...room,
       students: room.students
         .map(lockedStudent => {
-          const freshStudent = students.find(s => 
+          const freshStudent = students.find(s =>
             String(s.MSSV || (s as any).studentId || (s as any).id) === String(lockedStudent.MSSV || (lockedStudent as any).studentId || (lockedStudent as any).id)
           );
-          return freshStudent || null;
+          if (!freshStudent || freshStudent.isAbsent || freshStudent.Vang === 'x') {
+            return null;
+          }
+          return freshStudent;
         })
         .filter(Boolean) as Student[]
     }));
@@ -402,6 +454,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     if (onSetRoomLeader) {
       onSetRoomLeader(studentKey, roomStudentKeys);
     }
+    showToast(`Đã chỉ định trưởng phòng cho Phòng ${roomNumber}.`, 'success');
   };
 
   const handleRemoveLeader = (roomNumber: number) => {
@@ -421,6 +474,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     if (onSetRoomLeader) {
       onSetRoomLeader(null, roomStudentKeys);
     }
+    showToast(`Đã hủy chức vụ trưởng phòng của Phòng ${roomNumber}.`, 'success');
   };
 
   const totalActiveAllocated = useMemo(() => {
@@ -428,11 +482,43 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   }, [rooms]);
 
   const totalPenalized = useMemo(() => {
-    return students.filter((s: any) => s.isAbsent || s.isLate).length;
+    return students.filter((s: any) => (s.isAbsent || s.Vang === 'x') || s.isLate).length;
+  }, [students]);
+
+  const { totalFemale, totalMale } = useMemo(() => {
+    const validStudents = students.filter((s: any) => !s.isAbsent && s.Vang !== 'x');
+    const femaleCount = validStudents.filter((s: any) => s.gender === 'Nữ').length;
+    const maleCount = validStudents.filter((s: any) => s.gender !== 'Nữ').length;
+    return { totalFemale: femaleCount, totalMale: maleCount };
   }, [students]);
 
   return (
-    <div className="room-container">
+    <div className="room-container" style={{ position: 'relative' }}>
+      {/* Toast thông báo tùy chỉnh góc màn hình */}
+      {toastMessage && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          right: '20px',
+          zIndex: 9999,
+          background: toastMessage.type === 'success' ? '#f0fdf4' : '#fef2f2',
+          border: `1px solid ${toastMessage.type === 'success' ? '#86efac' : '#fca5a5'}`,
+          color: toastMessage.type === 'success' ? '#166534' : '#991b1b',
+          padding: '12px 18px',
+          borderRadius: '8px',
+          boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          fontSize: '14px',
+          fontWeight: 600,
+          animation: 'fadeIn 0.2s ease-in-out'
+        }}>
+          {toastMessage.type === 'success' ? <CheckCircle size={18} color="#16a34a" /> : <AlertCircle size={18} color="#dc2626" />}
+          <span>{toastMessage.text}</span>
+        </div>
+      )}
+
       <div className="room-header">
         <div>
           <h2 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -444,40 +530,72 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
             )}
           </h2>
           <p>
-            {isRoomLocked 
-              ? 'Phòng đã được khóa cố định. Nút "Nghỉ" đang hiển thị để xóa vĩnh viễn sinh viên khỏi CSDL.' 
-              : 'Đang ở chế độ tự động phân phòng. Hãy bấm "Khóa Cố Định Phòng" để hiển thị nút xóa nghỉ.'}
+            {isRoomLocked
+              ? 'Phòng đã được khóa cố định. Bấm "Nghỉ" để đánh dấu vắng và ẩn sinh viên khỏi sơ đồ.'
+              : 'Đang ở chế độ tự động phân phòng. Hãy bấm "Khóa Cố Định Phòng" hoặc "Xác Nhận Phòng" để lưu.'}
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           {canManage && (
-            <button
-              type="button"
-              onClick={toggleLockRooms}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '8px 14px',
-                borderRadius: '8px',
-                fontWeight: 600,
-                fontSize: '14px',
-                cursor: 'pointer',
-                border: isRoomLocked ? '1px solid #dc2626' : '1px solid #2563eb',
-                background: isRoomLocked ? '#fef2f2' : '#eff6ff',
-                color: isRoomLocked ? '#dc2626' : '#2563eb',
-              }}
-            >
-              {isRoomLocked ? <Lock size={16} /> : <Unlock size={16} />}
-              {isRoomLocked ? 'Mở Khóa Phòng' : 'Khóa Cố Định Phòng'}
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={handleConfirmAndSaveRooms}
+                disabled={isSavingRooms}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  border: '1px solid #16a34a',
+                  background: '#f0fdf4',
+                  color: '#16a34a',
+                }}
+              >
+                <CheckCircle size={16} />
+                {isSavingRooms ? 'Đang lưu...' : 'Xác Nhận Phòng'}
+              </button>
+
+              <button
+                type="button"
+                onClick={toggleLockRooms}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '8px',
+                  fontWeight: 600,
+                  fontSize: '14px',
+                  cursor: 'pointer',
+                  border: isRoomLocked ? '1px solid #dc2626' : '1px solid #2563eb',
+                  background: isRoomLocked ? '#fef2f2' : '#eff6ff',
+                  color: isRoomLocked ? '#dc2626' : '#2563eb',
+                }}
+              >
+                {isRoomLocked ? <Lock size={16} /> : <Unlock size={16} />}
+                {isRoomLocked ? 'Mở Khóa Phòng' : 'Khóa Cố Định Phòng'}
+              </button>
+            </>
           )}
 
           <div className="room-stats">
             <div className="stat-card">
               <Users size={18} color="#2563eb" />
               <span>Đang ở: <strong>{totalActiveAllocated}</strong> SV</span>
+            </div>
+            <div className="stat-card" style={{ background: '#fdf2f8', borderColor: '#fbcfe8', color: '#db2777' }}>
+              <User size={18} color="#db2777" />
+              <span>Tổng Nữ: <strong>{totalFemale}</strong></span>
+            </div>
+            <div className="stat-card" style={{ background: '#eff6ff', borderColor: '#bfdbfe', color: '#2563eb' }}>
+              <UserPlus size={18} color="#2563eb" />
+              <span>Tổng Nam: <strong>{totalMale}</strong></span>
             </div>
             <div className="stat-card warning">
               <AlertTriangle size={18} color="#dc2626" />
@@ -717,8 +835,8 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                       backgroundColor: room.hasPenalized
                         ? '#ef4444'
                         : room.genderType === 'Nữ'
-                        ? '#ec4899'
-                        : '#3b82f6',
+                          ? '#ec4899'
+                          : '#3b82f6',
                     }}
                   />
                 </div>
@@ -729,7 +847,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                   ) : (
                     room.students.map((st: any, idx) => {
                       const studentKey = String(st.MSSV || st.studentId || st.id);
-                      const displayCode = st.MSSV || st.studentId || st.id; 
+                      const displayCode = st.MSSV || st.studentId || st.id;
                       const isLeader = currentLeaderKey === studentKey;
                       const isPenalized = st.isLate;
                       const studentTeacher = st.thayCo || st.HoTen || st.hoTen;
@@ -740,11 +858,11 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                           key={studentKey + '-' + idx}
                           className={`student-item ${isPenalized ? 'bad-student' : ''}`}
                           style={{
-                            backgroundColor: isLeader 
-                              ? '#fefce8' 
+                            backgroundColor: isLeader
+                              ? '#fefce8'
                               : (selectedTeacherFilter && isTeacherMatch ? '#eff6ff' : undefined),
-                            borderColor: isLeader 
-                              ? '#fde047' 
+                            borderColor: isLeader
+                              ? '#fde047'
                               : (selectedTeacherFilter && isTeacherMatch ? '#bfdbfe' : undefined),
                             opacity: selectedTeacherFilter && !isTeacherMatch ? 0.4 : 1,
                             display: 'flex',
@@ -780,21 +898,20 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                             {st.isLate && <span className="tag-bad late" style={{ fontSize: '10px', padding: '1px 4px' }}>Trễ</span>}
-                            
-                            {/* Nút Nghỉ chỉ hiện khi phòng đã được KHÓA CỐ ĐỊNH */}
+
                             {canManage && isRoomLocked && (
                               <button
                                 type="button"
                                 onClick={() => setStudentToDelete(st)}
-                                title="Xóa vĩnh viễn sinh viên này ra khỏi database"
+                                title="Đánh dấu vắng và ẩn khỏi sơ đồ phòng"
                                 style={{
                                   display: 'flex',
                                   alignItems: 'center',
                                   gap: '2px',
                                   background: '#fef2f2',
-                                  color: '#dc2626',
                                   border: '1px solid #f87171',
-                                  padding: '3px 6px',
+                                  color: '#dc2626',
+                                  padding: '2px 6px',
                                   borderRadius: '4px',
                                   fontSize: '11px',
                                   fontWeight: 600,
@@ -817,16 +934,15 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
         )}
       </div>
 
-      {/* --- CUSTOM MODAL THÔNG BÁO XÁC NHẬN XÓA ĐẸP MẮT --- */}
+      {/* Modal xác nhận đánh dấu vắng sinh viên */}
       {studentToDelete && (
         <div style={{
           position: 'fixed',
           top: 0,
           left: 0,
-          width: '100vw',
-          height: '100vh',
-          backgroundColor: 'rgba(15, 23, 42, 0.6)',
-          backdropFilter: 'blur(4px)',
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0, 0, 0, 0.5)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -834,103 +950,73 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
           padding: '16px'
         }}>
           <div style={{
-            backgroundColor: '#ffffff',
-            borderRadius: '16px',
-            maxWidth: '420px',
+            background: '#ffffff',
+            borderRadius: '12px',
+            padding: '24px',
+            maxWidth: '400px',
             width: '100%',
             boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)',
-            overflow: 'hidden',
-            border: '1px solid #e2e8f0',
-            animation: 'modalScaleIn 0.2s ease-out'
+            border: '1px solid #e2e8f0'
           }}>
-            {/* Header Modal */}
-            <div style={{
-              padding: '24px 24px 16px 24px',
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: '16px'
-            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <div style={{
-                backgroundColor: '#fee2e2',
-                padding: '12px',
-                borderRadius: '12px',
-                color: '#dc2626',
+                background: '#fef2f2',
+                padding: '10px',
+                borderRadius: '50%',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                flexShrink: 0
+                color: '#dc2626'
               }}>
                 <AlertCircle size={24} />
               </div>
               <div>
-                <h3 style={{
-                  margin: '0 0 6px 0',
-                  fontSize: '18px',
-                  fontWeight: 700,
-                  color: '#0f172a'
-                }}>
-                  Xác nhận xóa sinh viên
-                </h3>
-                <p style={{
-                  margin: 0,
-                  fontSize: '14px',
-                  color: '#64748b',
-                  lineHeight: '1.5'
-                }}>
-                  Bạn có chắc chắn muốn xóa vĩnh viễn sinh viên <strong style={{ color: '#0f172a' }}>{studentToDelete.name}</strong> (<span style={{ color: '#2563eb' }}>{studentToDelete.MSSV || (studentToDelete as any).studentId || studentToDelete.id}</span>) ra khỏi cơ sở dữ liệu không?
-                </p>
+                <h3 style={{ margin: 0, fontSize: '18px', color: '#1e293b' }}>Xác nhận vắng học</h3>
+                <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: '#64748b' }}>Hành động này sẽ cập nhật trạng thái vắng</p>
               </div>
             </div>
 
-            {/* Footer Buttons */}
-            <div style={{
-              padding: '16px 24px',
-              backgroundColor: '#f8fafc',
-              borderTop: '1px solid #f1f5f9',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'flex-end',
-              gap: '10px'
-            }}>
+            <p style={{ fontSize: '14px', color: '#334155', marginBottom: '20px', lineHeight: '1.5' }}>
+              Bạn có chắc chắn muốn đánh dấu sinh viên <strong>{studentToDelete.name}</strong> ({studentToDelete.MSSV || (studentToDelete as any).studentId || studentToDelete.id}) là vắng mặt và ẩn khỏi sơ đồ phòng không?
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
               <button
                 type="button"
-                disabled={isDeleting}
                 onClick={() => setStudentToDelete(null)}
+                disabled={isDeleting}
                 style={{
-                  padding: '10px 16px',
-                  borderRadius: '8px',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
                   border: '1px solid #cbd5e1',
-                  backgroundColor: '#ffffff',
-                  color: '#334155',
+                  background: '#ffffff',
+                  color: '#475569',
                   fontSize: '14px',
                   fontWeight: 600,
-                  cursor: 'pointer',
-                  transition: 'background 0.2s'
+                  cursor: 'pointer'
                 }}
               >
-                Hủy bỏ
+                Hủy
               </button>
-              
               <button
                 type="button"
+                onClick={confirmMarkAbsent}
                 disabled={isDeleting}
-                onClick={confirmDeleteStudent}
                 style={{
-                  padding: '10px 20px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  backgroundColor: '#dc2626',
+                  padding: '8px 16px',
+                  borderRadius: '6px',
+                  border: '1px solid #dc2626',
+                  background: '#dc2626',
                   color: '#ffffff',
                   fontSize: '14px',
                   fontWeight: 600,
                   cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '6px',
-                  transition: 'background 0.2s'
+                  gap: '6px'
                 }}
               >
-                {isDeleting ? 'Đang xóa...' : 'Xóa vĩnh viễn'}
+                {isDeleting ? 'Đang xử lý...' : 'Xác nhận vắng'}
               </button>
             </div>
           </div>
