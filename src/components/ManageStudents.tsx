@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { supabase } from '../supabaseClient';
+import * as XLSX from 'xlsx'; // Import thư viện xuất Excel
 import type { Student } from '../types/student';
 import type { User } from '../types/auth';
 import './ManageStudents.css';
@@ -34,15 +35,174 @@ export function ManageStudents({
   // State Modal Thông báo thành công
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-  // Danh sách Lớp và danh sách Thầy/Cô
+  // State Modal Quản lý sinh viên trùng MSSV
+  const [showDuplicateModal, setShowDuplicateModal] = useState(false);
+  const [isCleaningDuplicates, setIsCleaningDuplicates] = useState(false);
+  
+  // State lưu trữ ID các bản ghi trùng muốn xóa
+  const [selectedToDelete, setSelectedToDelete] = useState<{ [mssv: string]: Set<string> }>({});
+
+  // Danh sách Lớp và Thầy/Cô
   const classes = Array.from(new Set(students.map((s) => s.className))).filter(Boolean);
   const teachers = Array.from(new Set(students.map((s) => s.thayCo))).filter(Boolean);
 
-  // Lọc sinh viên theo từ khóa, lớp và thầy cô
+  // Tính toán các MSSV bị trùng lặp
+  const duplicateGroups = useMemo(() => {
+    const map = new Map<string, Student[]>();
+    students.forEach((s) => {
+      const mssv = String(s.studentId || (s as any).MSSV || '').trim();
+      if (!mssv) return;
+      if (!map.has(mssv)) {
+        map.set(mssv, []);
+      }
+      map.get(mssv)!.push(s);
+    });
+
+    const duplicates: { mssv: string; items: Student[] }[] = [];
+    map.forEach((items, mssv) => {
+      if (items.length > 1) {
+        duplicates.push({ mssv, items });
+      }
+    });
+    return duplicates;
+  }, [students]);
+
+  const handleOpenDuplicateModal = () => {
+    const initialSelection: { [mssv: string]: Set<string> } = {};
+    duplicateGroups.forEach((group) => {
+      const deleteSet = new Set<string>();
+      // Mặc định tích chọn xóa từ phần tử thứ 2 trở đi, giữ lại phần tử đầu tiên
+      group.items.slice(1).forEach((item, idx) => {
+        const uniqueKey = item.id || `${group.mssv}_${idx + 1}`;
+        deleteSet.add(uniqueKey);
+      });
+      initialSelection[group.mssv] = deleteSet;
+    });
+    setSelectedToDelete(initialSelection);
+    setShowDuplicateModal(true);
+  };
+
+  const handleToggleDeleteTarget = (mssv: string, uniqueKey: string) => {
+    setSelectedToDelete((prev) => {
+      const currentSet = new Set(prev[mssv] || []);
+      if (currentSet.has(uniqueKey)) {
+        currentSet.delete(uniqueKey);
+      } else {
+        currentSet.add(uniqueKey);
+      }
+      return { ...prev, [mssv]: currentSet };
+    });
+  };
+
+  // Xóa dựa trên kết hợp MSSV và HoVaTen vì bảng không có cột id
+  const handleResolveDuplicates = async () => {
+    if (!canManage) return;
+    try {
+      setIsCleaningDuplicates(true);
+      let hasError = false;
+
+      for (const group of duplicateGroups) {
+        const deleteSet = selectedToDelete[group.mssv] || new Set();
+        
+        for (let i = 0; i < group.items.length; i++) {
+          const item = group.items[i];
+          const uniqueKey = item.id || `${group.mssv}_${i + 1}`;
+          
+          if (deleteSet.has(uniqueKey)) {
+            const mssvVal = group.mssv;
+            const tenVal = item.name || (item as any).HoVaTen || '';
+
+            const { error } = await supabase
+              .from('DanhSachSinhVien')
+              .delete()
+              .eq('MSSV', mssvVal)
+              .eq('HoVaTen', tenVal);
+                
+            if (error) {
+              hasError = true;
+              console.error(`Lỗi xóa bản ghi MSSV ${mssvVal}:`, error.message);
+            }
+          }
+        }
+      }
+
+      if (!hasError) {
+        alert('Đã dọn dẹp các sinh viên trùng MSSV thành công!');
+      } else {
+        alert('Đã hoàn tất nhưng có một vài lỗi xảy ra khi xóa dữ liệu.');
+      }
+
+      setShowDuplicateModal(false);
+
+      if (typeof onRefresh === 'function') {
+        await onRefresh();
+      } else {
+        window.location.reload();
+      }
+
+    } catch (err: any) {
+      console.error('Lỗi xử lý trùng lặp:', err);
+      alert('Không thể hoàn tất việc xóa trùng: ' + (err.message || err));
+    } finally {
+      setIsCleaningDuplicates(false);
+    }
+  };
+
+  // Hàm xuất file Excel đẹp mắt kèm Điểm Nề Nếp
+  const exportToExcel = (data: any[], fileName: string) => {
+    if (!data || data.length === 0) return;
+
+    const formattedData = data.map((item, index) => ({
+      'STT': index + 1,
+      'Mã Khóa Học': item.MaKhóaHoc || '',
+      'Đợt': item.Dot || '',
+      'Học Kỳ': item.HocKy || '',
+      'Năm Học': item.NamHoc || '',
+      'MSSV': item.MSSV || '',
+      'Họ và Tên': item.HoVaTen || '',
+      'Giới Tính': item.GioiTinh || '',
+      'Lớp': item.Lop || '',
+      'Phòng': item.Phong || '',
+      'Điểm Nề Nếp': item.DiemNeNep ?? '',
+      'Vắng': item.Vang || '',
+      'Đi Trễ': item.DiTre || '',
+      'Mượn Đồ': item.MuonDo || '',
+      'Trưởng Phòng': item.TruongPhong || ''
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(formattedData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'DanhSachTongHop');
+
+    const colWidths = [
+      { wch: 6 },  // STT
+      { wch: 18 }, // Mã Khóa Học
+      { wch: 10 }, // Đợt
+      { wch: 10 }, // Học Kỳ
+      { wch: 15 }, // Năm Học
+      { wch: 12 }, // MSSV
+      { wch: 25 }, // Họ và Tên
+      { wch: 10 }, // Giới Tính
+      { wch: 15 }, // Lớp
+      { wch: 12 }, // Phòng
+      { wch: 15 }, // Điểm Nề Nếp
+      { wch: 8 },  // Vắng
+      { wch: 8 },  // Đi Trễ
+      { wch: 10 }, // Mượn Đồ
+      { wch: 15 }, // Trưởng Phòng
+    ];
+    worksheet['!cols'] = colWidths;
+
+    XLSX.writeFile(workbook, `${fileName}.xlsx`);
+  };
+
+  // 🌟 ĐÃ SỬA: Lọc dữ liệu an toàn tránh lỗi toLowerCase của undefined
   const filteredStudents = students.filter((student) => {
-    const matchSearch =
-      student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      student.studentId.toLowerCase().includes(searchTerm.toLowerCase());
+    const studentName = String(student?.name || '').toLowerCase();
+    const studentId = String(student?.studentId || '').toLowerCase();
+    const search = searchTerm.toLowerCase();
+
+    const matchSearch = studentName.includes(search) || studentId.includes(search);
     const matchClass = selectedClass === 'all' || student.className === selectedClass;
     const matchTeacher = selectedTeacher === 'all' || student.thayCo === selectedTeacher;
     return matchSearch && matchClass && matchTeacher;
@@ -52,81 +212,64 @@ export function ManageStudents({
   const absentCount = students.filter((s) => s.isAbsent).length;
   const lateCount = students.filter((s) => s.isLate).length;
   const borrowCount = students.filter((s: any) => s.isBorrow).length;
-
-  // 🌟 TÍNH SỐ LƯỢNG HIỆN DIỆN (TỔNG TRỪ VẮNG)
   const presentCount = totalStudents - absentCount;
 
-  // 🌟 XỬ LÝ CLICK CHECKBOX ĐI TRỄ KÈM CẬP NHẬT CSDL SUPABASE CHO CỘT 'late_at'
-  const handleLateChange = async (student: Student) => {
-    if (!canManage) return;
-
-    const targetId = student.id || student.studentId;
-    const nextIsLate = !student.isLate;
-    const currentTime = nextIsLate ? new Date().toISOString() : null;
-    const diTreVal = nextIsLate ? 'x' : null; // Lưu 'x' vào cột DiTre giống cách dùng MuonDo
-
-    // 1. Gọi hàm thay đổi state ở component cha
-    onToggleAttendance(targetId, 'isLate');
-
-    try {
-      // 2. Cập nhật đúng tên cột trong cơ sở dữ liệu của bạn: DiTre và late_at
-      const { error } = await supabase
-        .from('DanhSachSinhVien')
-        .update({
-          DiTre: diTreVal,
-          late_at: currentTime,
-        })
-        .eq('MSSV', student.studentId); // Khớp với cột MSSV trong bảng
-
-      if (error) {
-        console.error('Lỗi cập nhật late_at lên Supabase:', error.message);
-      }
-    } catch (err) {
-      console.error('Lỗi kết nối Supabase khi cập nhật trạng thái trễ:', err);
-    }
-  };
-  // 🌟 SAO LƯU DỮ LIỆU SANG 'KhoaHocDaKetThuc' RỒI MỚI XÓA BẢNG 'DanhSachSinhVien'
   const handleConfirmEndCourse = async (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!canManage) {
-      alert('Bạn không có quyền thực hiện thao tác này!');
-      return;
-    }
-
-    if (!dot.trim() || !hocKy.trim() || !namHoc.trim()) return;
+    if (!canManage || !dot.trim() || !hocKy.trim() || !namHoc.trim()) return;
 
     try {
       setIsDeleting(true);
-
-      // 1. Đọc toàn bộ danh sách sinh viên hiện tại trong CSDL Supabase
+      
       const { data: currentDbStudents, error: fetchError } = await supabase
         .from('DanhSachSinhVien')
         .select('*');
 
       if (fetchError) throw fetchError;
 
-      // 2. Chuẩn bị dữ liệu lưu vào bảng KhoaHocDaKetThuc
+      const { data: chamDiemData, error: chamDiemError } = await supabase
+        .from('ChamDiem')
+        .select('MSV, DiemNeNep');
+
+      if (chamDiemError) {
+        console.error('Không thể lấy dữ liệu bảng ChamDiem:', chamDiemError.message);
+      }
+
+      const diemMap = new Map<string, any>();
+      if (chamDiemData) {
+        chamDiemData.forEach((row) => {
+          if (row.MSV) {
+            diemMap.set(String(row.MSV).trim(), row.DiemNeNep);
+          }
+        });
+      }
+
       if (currentDbStudents && currentDbStudents.length > 0) {
         const maKhoaHoc = `${dot.trim().replace(/\s+/g, '')}_${hocKy.trim().replace(/\s+/g, '')}_${namHoc.trim().replace(/\s+/g, '')}`;
+        
+        const historyPayload = currentDbStudents.map((s) => {
+          const mssvVal = String(s.MSSV || s.MSV || s.studentId || '').trim();
+          return {
+            MaKhóaHoc: maKhoaHoc,
+            Dot: dot.trim(),
+            HocKy: hocKy.trim(),
+            NamHoc: namHoc.trim(),
+            MSSV: mssvVal,
+            HoVaTen: s.HoVaTen || s.Ten || s.name || '',
+            GioiTinh: s.GioiTinh || s.gender || 'Nam',
+            Lop: s.Lop || s.className || '',
+            Phong: s.Phong || s.TenPhong || s.room || null,
+            DiemNeNep: diemMap.has(mssvVal) ? diemMap.get(mssvVal) : (s.DiemNeNep ?? null),
+            Vang: s.Vang ? String(s.Vang) : null,
+            DiTre: s.DiTre ? String(s.DiTre) : null,
+            MuonDo: s.MuonDo ? String(s.MuonDo) : null,
+            TruongPhong: s.TruongPhong ? String(s.TruongPhong) : null,
+          };
+        });
 
-        const historyPayload = currentDbStudents.map((s) => ({
-          MaKhóaHoc: maKhoaHoc,
-          Dot: dot.trim(),
-          HocKy: hocKy.trim(),
-          NamHoc: namHoc.trim(),
-          MSSV: s.MSSV || s.MSV || s.studentId || '',
-          HoVaTen: s.HoVaTen || s.Ten || s.name || '',
-          GioiTinh: s.GioiTinh || s.gender || 'Nam',
-          Lop: s.Lop || s.className || '',
-          Phong: s.Phong || s.TenPhong || s.room || null,
-          Vang: s.Vang ? String(s.Vang) : null,
-          DiTre: s.DiTre ? String(s.DiTre) : null,
-          MuonDo: s.MuonDo ? String(s.MuonDo) : null,
-          TruongPhong: s.TruongPhong ? String(s.TruongPhong) : null,
-        }));
+        const excelFileName = `TongHop_${dot.trim()}_${hocKy.trim()}_${namHoc.trim().replace(/\s+/g, '_')}`;
+        exportToExcel(historyPayload, excelFileName);
 
-        // Chèn vào bảng lưu trữ lịch sử
         const { error: insertError } = await supabase
           .from('KhoaHocDaKetThuc')
           .insert(historyPayload);
@@ -134,65 +277,67 @@ export function ManageStudents({
         if (insertError) throw insertError;
       }
 
-      // 3. Tiến hành xóa toàn bộ dữ liệu hiện tại trong bảng DanhSachSinhVien
       const { error: deleteError } = await supabase
         .from('DanhSachSinhVien')
         .delete()
         .neq('MSSV', '___NEVER_MATCH___');
 
       if (deleteError) {
-        const { error: deleteAltError } = await supabase
-          .from('DanhSachSinhVien')
-          .delete()
-          .gte('STT', 0);
-
-        if (deleteAltError) throw deleteAltError;
+        await supabase.from('DanhSachSinhVien').delete().gte('STT', 0);
       }
 
-      // Đóng modal nhập liệu và mở Modal thông báo thành công
       setIsModalOpen(false);
       setShowSuccessModal(true);
-
     } catch (err: any) {
-      console.error('Lỗi khi sao lưu hoặc xóa dữ liệu:', err);
       alert('❌ Lỗi thao tác Supabase: ' + (err.message || 'Không thể hoàn tất thao tác.'));
     } finally {
       setIsDeleting(false);
     }
   };
 
-  // Đóng Modal Thành công & Reload dữ liệu
   const handleCloseSuccess = () => {
     setShowSuccessModal(false);
     setDot('');
     setHocKy('');
     setNamHoc('');
-
-    if (onRefresh) {
-      onRefresh();
-    } else {
-      window.location.reload();
-    }
+    if (typeof onRefresh === 'function') onRefresh();
+    else window.location.reload();
   };
 
   return (
     <div className="manage-students-container">
-      {/* HEADER TỔNG QUAN */}
       <div className="manage-header">
         <div>
           <h1 className="manage-title">Quản Lý Điểm Danh & Vi Phạm</h1>
-          <p className="manage-subtitle">
-            Tích vắng/đi trễ/mượn đồ để cập nhật trực tiếp lên hệ thống
-          </p>
+          <p className="manage-subtitle">Tích vắng/đi trễ/mượn đồ để cập nhật trực tiếp lên hệ thống</p>
         </div>
 
-        {/* THỐNG KÊ & NÚT KẾT THÚC KHÓA HỌC */}
         <div className="manage-actions">
           <span className="stat-badge total">👥 Tổng: {totalStudents}</span>
           <span className="stat-badge present" style={{ backgroundColor: '#dcfce7', color: '#16a34a' }}>✅ Hiện diện: {presentCount}</span>
           <span className="stat-badge absent">🙅 Vắng: {absentCount}</span>
           <span className="stat-badge late">⏰ Trễ: {lateCount}</span>
           <span className="stat-badge borrow" style={{ backgroundColor: '#fef3c7', color: '#d97706' }}>📦 Mượn đồ: {borrowCount}</span>
+
+          {duplicateGroups.length > 0 && canManage && (
+            <button
+              onClick={handleOpenDuplicateModal}
+              style={{
+                backgroundColor: '#fef2f2',
+                color: '#dc2626',
+                border: '1px solid #fca5a5',
+                padding: '8px 14px',
+                borderRadius: '8px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px'
+              }}
+            >
+              ⚠️ Trùng MSSV ({duplicateGroups.length})
+            </button>
+          )}
 
           {canManage && (
             <button onClick={() => setIsModalOpen(true)} className="btn-end-course">
@@ -202,7 +347,6 @@ export function ManageStudents({
         </div>
       </div>
 
-      {/* THANH TÌM KIẾM & LỌC */}
       <div className="filter-bar">
         <input
           type="text"
@@ -219,9 +363,7 @@ export function ManageStudents({
         >
           <option value="all">Tất cả giáo viên</option>
           {teachers.map((t) => (
-            <option key={t || ''} value={t || ''}>
-              {t || 'Trống'}
-            </option>
+            <option key={t || ''} value={t || ''}>{t || 'Trống'}</option>
           ))}
         </select>
 
@@ -232,14 +374,11 @@ export function ManageStudents({
         >
           <option value="all">Tất cả các lớp</option>
           {classes.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
+            <option key={c} value={c}>{c}</option>
           ))}
         </select>
       </div>
 
-      {/* BẢNG DANH SÁCH SINH VIÊN */}
       <div className="table-card">
         <table className="student-table">
           <thead>
@@ -292,7 +431,7 @@ export function ManageStudents({
                         type="checkbox"
                         checked={student.isLate || false}
                         disabled={!canManage}
-                        onChange={() => handleLateChange(student)}
+                        onChange={() => canManage && onToggleAttendance(student.id || student.studentId, 'isLate')}
                         className="checkbox-late"
                         style={{ cursor: canManage ? 'pointer' : 'not-allowed' }}
                       />
@@ -315,34 +454,112 @@ export function ManageStudents({
         </table>
       </div>
 
-      {/* 1️⃣ POPUP MODAL NHẬP THÔNG TIN KẾT THÚC KHÓA HỌC */}
+      {showDuplicateModal && (
+        <div className="modal-overlay">
+          <div className="modal-card" style={{ maxWidth: '650px', width: '90%' }}>
+            <div className="modal-header">
+              <div>
+                <h3 className="modal-title">⚠️ Tùy Chọn Xóa Sinh Viên Trùng MSSV</h3>
+                <p className="modal-subtitle">Tích chọn dòng bạn muốn <b>xóa bỏ</b> cho mỗi mã sinh viên bị trùng.</p>
+              </div>
+              <button onClick={() => setShowDuplicateModal(false)} className="modal-close">✕</button>
+            </div>
+
+            <div style={{ maxHeight: '350px', overflowY: 'auto', margin: '16px 0', border: '1px solid #e2e8f0', borderRadius: '8px', padding: '12px' }}>
+              {duplicateGroups.map((group, idx) => {
+                const deleteSet = selectedToDelete[group.mssv] || new Set();
+                return (
+                  <div key={idx} style={{ marginBottom: '16px', paddingBottom: '12px', borderBottom: '1px solid #f1f5f9' }}>
+                    <div style={{ fontWeight: 'bold', color: '#1e293b', marginBottom: '6px' }}>
+                      MSSV: {group.mssv} <span style={{ fontSize: '12px', color: '#64748b' }}>(Trùng {group.items.length} lần)</span>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', marginLeft: '8px' }}>
+                      {group.items.map((it, i) => {
+                        const uniqueKey = it.id || `${group.mssv}_${i + 1}`;
+                        const isMarkedForDelete = deleteSet.has(uniqueKey);
+                        return (
+                          <label
+                            key={uniqueKey}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '8px 12px',
+                              borderRadius: '6px',
+                              backgroundColor: isMarkedForDelete ? '#fef2f2' : '#f8fafc',
+                              border: `1px solid ${isMarkedForDelete ? '#fca5a5' : '#e2e8f0'}`,
+                              cursor: 'pointer',
+                              fontSize: '13px'
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                              <input
+                                type="checkbox"
+                                checked={isMarkedForDelete}
+                                onChange={() => handleToggleDeleteTarget(group.mssv, uniqueKey)}
+                                style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                              />
+                              <span>
+                                <b>{it.name}</b> — Lớp: {it.className || 'Trống'}
+                              </span>
+                            </div>
+                            <span style={{ fontWeight: 600, color: isMarkedForDelete ? '#dc2626' : '#16a34a' }}>
+                              {isMarkedForDelete ? '❌ Sẽ xóa' : '✨ Giữ lại'}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="modal-actions">
+              <button type="button" onClick={() => setShowDuplicateModal(false)} className="btn-cancel">
+                Đóng
+              </button>
+              <button
+                type="button"
+                disabled={isCleaningDuplicates}
+                onClick={handleResolveDuplicates}
+                style={{
+                  backgroundColor: '#dc2626',
+                  color: '#fff',
+                  border: 'none',
+                  padding: '10px 16px',
+                  borderRadius: '8px',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                {isCleaningDuplicates ? 'Đang xóa...' : 'Xác nhận xóa các dòng đã chọn'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isModalOpen && canManage && (
         <div className="modal-overlay">
           <div className="modal-card">
             <div className="modal-header-icon">🎓</div>
-
             <div className="modal-header">
               <div>
                 <h3 className="modal-title">Kết Thúc Khóa Học</h3>
-                <p className="modal-subtitle">Nhập thông tin khóa học để sao lưu lịch sử và làm sạch dữ liệu hiện tại.</p>
+                <p className="modal-subtitle">Nhập thông tin khóa học để sao lưu lịch sử, tải file Excel và làm sạch dữ liệu hiện tại.</p>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="modal-close">
-                ✕
-              </button>
+              <button onClick={() => setIsModalOpen(false)} className="modal-close">✕</button>
             </div>
 
             <form onSubmit={handleConfirmEndCourse} className="modal-form">
               <div className="modal-warning-card">
                 <span style={{ fontSize: '18px' }}>🚨</span>
-                <div>
-                  <strong>Lưu ý:</strong> Dữ liệu sẽ được lưu trữ tự động vào CSDL Lịch sử trước khi xóa danh sách hiện tại.
-                </div>
+                <div><strong>Lưu ý:</strong> Hệ thống sẽ tự động tải file Excel tổng hợp về máy và lưu trữ vào CSDL Lịch sử trước khi xóa danh sách hiện tại.</div>
               </div>
 
               <div className="form-group">
-                <label className="form-label">
-                  Đợt <span className="required">*</span>
-                </label>
+                <label className="form-label">Đợt <span className="required">*</span></label>
                 <input
                   type="text"
                   required
@@ -354,9 +571,7 @@ export function ManageStudents({
               </div>
 
               <div className="form-group">
-                <label className="form-label">
-                  Học Kỳ <span className="required">*</span>
-                </label>
+                <label className="form-label">Học Kỳ <span className="required">*</span></label>
                 <input
                   type="text"
                   required
@@ -368,9 +583,7 @@ export function ManageStudents({
               </div>
 
               <div className="form-group">
-                <label className="form-label">
-                  Năm Học <span className="required">*</span>
-                </label>
+                <label className="form-label">Năm Học <span className="required">*</span></label>
                 <input
                   type="text"
                   required
@@ -382,16 +595,11 @@ export function ManageStudents({
               </div>
 
               <div className="modal-actions">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  disabled={isDeleting}
-                  className="btn-cancel"
-                >
+                <button type="button" onClick={() => setIsModalOpen(false)} disabled={isDeleting} className="btn-cancel">
                   Hủy bỏ
                 </button>
                 <button type="submit" disabled={isDeleting} className="btn-delete">
-                  {isDeleting ? 'Đang lưu & xóa...' : 'Đồng Ý & Kết Thúc'}
+                  {isDeleting ? 'Đang xuất file & xử lý...' : 'Đồng Ý & Xuất Excel'}
                 </button>
               </div>
             </form>
@@ -399,50 +607,19 @@ export function ManageStudents({
         </div>
       )}
 
-      {/* 2️⃣ POPUP MODAL THÔNG BÁO THÀNH CÔNG */}
       {showSuccessModal && (
         <div className="modal-overlay">
           <div className="modal-card" style={{ textAlign: 'center' }}>
-            <div
-              style={{
-                width: '64px',
-                height: '64px',
-                backgroundColor: '#dcfce7',
-                color: '#16a34a',
-                borderRadius: '50%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontSize: '32px',
-                margin: '0 auto 16px auto'
-              }}
-            >
+            <div style={{ width: '64px', height: '64px', backgroundColor: '#dcfce7', color: '#16a34a', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '32px', margin: '0 auto 16px auto' }}>
               ✓
             </div>
-
             <h3 style={{ fontSize: '20px', fontWeight: '800', color: '#0f172a', margin: '0 0 8px 0' }}>
               Kết Thúc Khóa Học Thành Công!
             </h3>
-
             <p style={{ fontSize: '14px', color: '#64748b', margin: '0 0 20px 0', lineHeight: '1.5' }}>
-              Đã sao lưu thông tin <strong>{dot} - {hocKy} - {namHoc}</strong> vào kho Lịch Sử và làm sạch bảng hiện tại.
+              Đã tải file Excel, sao lưu thông tin <strong>{dot} - {hocKy} - {namHoc}</strong> vào kho Lịch Sử và làm sạch bảng hiện tại.
             </p>
-
-            <button
-              onClick={handleCloseSuccess}
-              style={{
-                width: '100%',
-                padding: '12px',
-                backgroundColor: '#16a34a',
-                color: '#ffffff',
-                border: 'none',
-                borderRadius: '12px',
-                fontSize: '15px',
-                fontWeight: '700',
-                cursor: 'pointer',
-                boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)'
-              }}
-            >
+            <button onClick={handleCloseSuccess} style={{ width: '100%', padding: '12px', backgroundColor: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '12px', fontSize: '15px', fontWeight: '700', cursor: 'pointer', boxShadow: '0 4px 12px rgba(22, 163, 74, 0.25)' }}>
               Hoàn tất
             </button>
           </div>
