@@ -183,7 +183,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     return Math.max(0, 10 - totalPenalty);
   }, [scores]);
 
-  // --- HÀM LƯU ĐIỂM TỰ ĐỘNG LÊN SUPABASE NGAY LẬP TỨC CHO TỪNG HỌC SINH ---
   const saveStudentScoreToDB = async (studentKey: string, updatedStudentScores: Record<number, RecordEntry[]>) => {
     try {
       let hoVaTen = '';
@@ -247,7 +246,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       const newStudentScores = { ...studentData, [day]: updatedDayData };
       const newAllScores = { ...prev, [studentKey]: newStudentScores };
 
-      // Gọi lưu thẳng lên DB ngầm lập tức
       saveStudentScoreToDB(studentKey, newStudentScores);
 
       return newAllScores;
@@ -692,6 +690,26 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   }, [isRoomLocked, lockedRoomsData, calculateRoomAllocation, students]);
 
   const rooms = getRoomsToDisplay;
+
+  // Tính số lượng Nam và Nữ đang phân phòng
+  const genderCounts = useMemo(() => {
+    let maleCount = 0;
+    let femaleCount = 0;
+
+    rooms.forEach(room => {
+      (room.students || []).forEach((st: any) => {
+        if (!st) return;
+        const g = String(st.GioiTinh || st.gender || '').trim().toLowerCase();
+        if (g === 'nam') {
+          maleCount++;
+        } else if (g === 'nữ' || g === 'nu') {
+          femaleCount++;
+        }
+      });
+    });
+
+    return { maleCount, femaleCount };
+  }, [rooms]);
 
   const lateStudentsList = useMemo(() => {
     const result: { student: any; roomNumber: number }[] = [];
@@ -1372,6 +1390,15 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
               <Users size={16} color="#0284c7" />
               <span>Tổng SV: <strong>{totalActiveAllocated} SV</strong></span>
             </div>
+            
+            {/* THÊM HIỂN THỊ SỐ LƯỢNG NAM & NỮ */}
+            <div className="stat-card" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#eff6ff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #bfdbfe', fontSize: '13px', color: '#1d4ed8' }}>
+              <span>👨 Nam: <strong>{genderCounts.maleCount}</strong></span>
+            </div>
+            <div className="stat-card" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#fce7f3', padding: '6px 12px', borderRadius: '8px', border: '1px solid #fbcfe8', fontSize: '13px', color: '#db2777' }}>
+              <span>👩 Nữ: <strong>{genderCounts.femaleCount}</strong></span>
+            </div>
+
             <div className="stat-card" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f8fafc', padding: '6px 12px', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '13px' }}>
               <Home size={16} color="#475569" />
               <span>Phòng: <strong>{rooms.length}</strong></span>
