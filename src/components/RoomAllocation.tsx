@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Home, Users, AlertTriangle, Crown, UserCheck, Filter, Lock, Unlock, UserX, AlertCircle, UserPlus, CheckCircle, Plus, Edit3, Eye, Settings, Trash2, FileSpreadsheet, Clock } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import type { Student } from '../types/student';
@@ -82,6 +82,8 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   const [isSavingRooms, setIsSavingRooms] = useState<boolean>(false);
 
   const [scores, setScores] = useState<ScoringMap>({});
+  // Luôn giữ bản điểm mới nhất để handler không bị stale closure
+  const scoresRef = useRef<ScoringMap>({});
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [violations, setViolations] = useState<ViolationRule[]>(DEFAULT_VIOLATIONS);
   const [isViolationModalOpen, setIsViolationModalOpen] = useState<boolean>(false);
@@ -119,23 +121,49 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
   const [extraEmptyRooms, setExtraEmptyRooms] = useState<{ gender: 'Nam' | 'Nữ' }[]>([]);
 
   useEffect(() => {
+    let isMounted = true;
+
     const fetchScoringData = async () => {
       try {
-        const { data: ruleData } = await supabase.from('ViolationRules').select('*');
+        // Dùng biến cục bộ, KHÔNG đọc state `violations` để effect chỉ chạy 1 lần
+        let activeRules: ViolationRule[] = [...DEFAULT_VIOLATIONS];
+
+        const { data: ruleData, error: ruleError } = await supabase.from('ViolationRules').select('*');
+        if (ruleError) console.error('Lỗi tải ViolationRules:', ruleError.message);
+
         if (ruleData && ruleData.length > 0) {
-          const customRules = ruleData.map((r: any) => ({
+          const customRules: ViolationRule[] = ruleData.map((r: any) => ({
             code: r.Code || r.code,
             displayCode: r.DisplayCode || r.displayCode || r.Code || r.code,
             label: r.Label || r.label || `Lỗi: ${r.Code || r.code}`,
             penalty: Number(r.Penalty ?? r.penalty) || 1,
           }));
-          const mapRules = new Map();
+          const mapRules = new Map<string, ViolationRule>();
           DEFAULT_VIOLATIONS.forEach(v => mapRules.set(v.code, v));
           customRules.forEach(v => mapRules.set(v.code, v));
-          setViolations(Array.from(mapRules.values()));
+          activeRules = Array.from(mapRules.values());
+          if (isMounted) setViolations(activeRules);
         }
 
-        const { data: scoreData } = await supabase.from('ChamDiem').select('*');
+        // Supabase mặc định chỉ trả tối đa 1000 dòng/lần -> tải theo từng trang cho đủ
+        const PAGE_SIZE = 1000;
+        const scoreData: any[] = [];
+        for (let from = 0; ; from += PAGE_SIZE) {
+          const { data: pageData, error: scoreError } = await supabase
+            .from('ChamDiem')
+            .select('*')
+            .order('MSV', { ascending: true })
+            .range(from, from + PAGE_SIZE - 1);
+          if (scoreError) {
+            console.error('Lỗi tải ChamDiem:', scoreError.message, scoreError);
+            break;
+          }
+          if (!pageData || pageData.length === 0) break;
+          scoreData.push(...pageData);
+          if (pageData.length < PAGE_SIZE) break;
+        }
+        console.log(`[ChamDiem] đã tải ${scoreData.length} dòng`);
+
         if (scoreData && scoreData.length > 0) {
           const loadedScores: ScoringMap = {};
           const loadedNotes: Record<string, string> = {};
@@ -151,7 +179,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                 const dayEntries: RecordEntry[] = [];
                 codes.forEach((c) => {
                   const trimmedCode = c.trim();
-                  const target = violations.find((v) => v.code === trimmedCode || v.displayCode === trimmedCode);
+                  const target = activeRules.find((v) => v.code === trimmedCode || v.displayCode === trimmedCode);
                   if (target) {
                     dayEntries.push({ code: target.code, displayCode: target.displayCode, penalty: target.penalty });
                   } else if (trimmedCode) {
@@ -162,15 +190,22 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
               }
             }
           });
-          setScores(loadedScores);
-          setNotes(loadedNotes);
+          if (isMounted) {
+            scoresRef.current = loadedScores;
+            setScores(loadedScores);
+            setNotes(loadedNotes);
+          }
         }
       } catch (err) {
         console.error('Lỗi tải dữ liệu chấm điểm:', err);
       }
     };
+
     fetchScoringData();
-  }, [violations]);
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const calculateFinalScore = useCallback((studentKey: string) => {
     const studentData = scores[studentKey];
@@ -182,7 +217,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     return Math.max(0, 10 - totalPenalty);
   }, [scores]);
 
-  const saveStudentScoreToDB = async (studentKey: string, updatedStudentScores: Record<number, RecordEntry[]>) => {
+  const saveStudentScoreToDB = async (studentKey: string, updatedStudentScores: Record<number, RecordEntry[]>): Promise<boolean> => {
     try {
       let hoVaTen = '';
       let roomNum: number | null = null;
@@ -216,17 +251,25 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       const rowPayload = {
         MSV: studentKey,
         HoVaTen: hoVaTen || studentKey,
-        DiemNeNep: finalScore,
+        // Cột DiemNeNep là int8 nên không nhận số lẻ (9.5) -> làm tròn trước khi lưu
+        DiemNeNep: Math.round(finalScore),
         Phong: roomNum,
         ...dayDataRecord
       };
 
-      await supabase
+      // supabase KHÔNG throw khi lỗi, phải đọc `error` thủ công
+      const { error } = await supabase
         .from('ChamDiem')
         .upsert([rowPayload], { onConflict: 'MSV' });
 
+      if (error) {
+        console.error('Lỗi lưu điểm lên ChamDiem:', error.message, error);
+        return false;
+      }
+      return true;
     } catch (err) {
       console.error('Lỗi auto-save điểm:', err);
+      return false;
     }
   };
 
@@ -236,19 +279,30 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
       return;
     }
 
-    setScores((prev) => {
-      const studentData = prev[studentKey] || {};
-      const dayData = studentData[day] || [];
-      const exists = dayData.some((item) => item.code === code);
-      const updatedDayData = exists ? dayData.filter((item) => item.code !== code) : [...dayData, { code, displayCode, penalty }];
-      
-      const newStudentScores = { ...studentData, [day]: updatedDayData };
-      const newAllScores = { ...prev, [studentKey]: newStudentScores };
+    const prev = scoresRef.current;
+    const studentData = prev[studentKey] || {};
+    const dayData = studentData[day] || [];
+    const exists = dayData.some((item) => item.code === code);
+    const updatedDayData = exists
+      ? dayData.filter((item) => item.code !== code)
+      : [...dayData, { code, displayCode, penalty }];
 
-      saveStudentScoreToDB(studentKey, newStudentScores);
+    const newStudentScores = { ...studentData, [day]: updatedDayData };
+    const newAllScores = { ...prev, [studentKey]: newStudentScores };
 
-      return newAllScores;
-    });
+    // Cập nhật giao diện ngay (optimistic)
+    scoresRef.current = newAllScores;
+    setScores(newAllScores);
+
+    // Lưu DB đúng 1 lần, nằm ngoài setState
+    const ok = await saveStudentScoreToDB(studentKey, newStudentScores);
+    if (!ok) {
+      // Lưu lỗi -> hoàn tác để UI không hiển thị điểm "ảo"
+      const rolledBack = { ...scoresRef.current, [studentKey]: studentData };
+      scoresRef.current = rolledBack;
+      setScores(rolledBack);
+      showToast('Lưu điểm lên database thất bại! Kiểm tra console để biết chi tiết.', 'error');
+    }
   };
 
   const handleViolationSelectChange = async (studentKey: string, day: number, e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -356,6 +410,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
   const calculateRoomAllocation = useCallback((): Room[] => {
     const safeStudents = Array.isArray(students) ? students : [];
+    // Loại bỏ các sinh viên vắng và lọc trùng lặp theo MSSV ngay từ đầu
     const uniqueMap = new Map();
     safeStudents.forEach((s: any) => {
       if (!s) return;
@@ -706,6 +761,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
   const rooms = getRoomsToDisplay;
 
+  // Tính số lượng Nam và Nữ đang phân phòng
   const genderCounts = useMemo(() => {
     let maleCount = 0;
     let femaleCount = 0;
@@ -855,8 +911,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
         const mssvValue = getStudentCode(st);
         const hoVaTen = st?.name || (st as any).HoVaTen || '';
         if (mssvValue) {
-          const finalScore = calculateFinalScore(mssvValue);
-
           await supabase
             .from('DanhSachSinhVien')
             .update({ Phong: newRoomNum })
@@ -867,8 +921,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
             .upsert({
               MSV: mssvValue,
               HoVaTen: hoVaTen,
-              Phong: newRoomNum,
-              DiemNeNep: finalScore
+              Phong: newRoomNum
             }, { onConflict: 'MSV' });
         }
       }
@@ -900,7 +953,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     }
   };
 
-  // Nút Xác Nhận Phòng sẽ lưu phòng và đồng thời đẩy DiemNeNep lên bảng ChamDiem[cite: 10, 11]
   const handleConfirmAndSaveRooms = async () => {
     if (!canManage) return;
     setIsSavingRooms(true);
@@ -913,8 +965,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
           const mssvValue = getStudentCode(st);
           const hoVaTen = st?.name || (st as any).HoVaTen || '';
           if (mssvValue) {
-            const finalScore = calculateFinalScore(mssvValue);
-
             await supabase
               .from('DanhSachSinhVien')
               .update({ Phong: room.roomNumber, Vang: null })
@@ -925,8 +975,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
               .upsert({
                 MSV: mssvValue,
                 HoVaTen: hoVaTen,
-                Phong: room.roomNumber,
-                DiemNeNep: finalScore
+                Phong: room.roomNumber
               }, { onConflict: 'MSV' });
           }
         }
@@ -936,8 +985,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
         const mssvValue = getStudentCode(st);
         const hoVaTen = (st as any).HoVaTen || (st as any).name || '';
         if (mssvValue) {
-          const finalScore = calculateFinalScore(mssvValue);
-
           await supabase
             .from('DanhSachSinhVien')
             .update({ Phong: null, Vang: 'x' })
@@ -948,8 +995,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
             .upsert({
               MSV: mssvValue,
               HoVaTen: hoVaTen,
-              Phong: null,
-              DiemNeNep: finalScore
+              Phong: null
             }, { onConflict: 'MSV' });
         }
       }
@@ -967,7 +1013,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
         throw new Error(configError.message);
       }
 
-      showToast('Đã lưu cố định sơ đồ phòng và đồng bộ số phòng, điểm nề nếp lên CSDL thành công!', 'success');
+      showToast('Đã lưu cố định sơ đồ phòng và đồng bộ số phòng lên CSDL thành công!', 'success');
     } catch (err: any) {
       console.error('Lỗi khi lưu phòng:', err);
       showToast('Lỗi khi lưu phòng: ' + (err?.message || err), 'error');
@@ -1028,7 +1074,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
         mssvValue = getStudentCode(studentToRestore);
         hoVaTen = (studentToRestore as any).HoVaTen || (studentToRestore as any).name || '';
-        const finalScore = calculateFinalScore(mssvValue);
 
         await supabase
           .from('DanhSachSinhVien')
@@ -1040,8 +1085,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
           .upsert({
             MSV: mssvValue,
             HoVaTen: hoVaTen,
-            Phong: targetRoomForAdd,
-            DiemNeNep: finalScore
+            Phong: targetRoomForAdd
           }, { onConflict: 'MSV' });
 
         updatedStudentObj = {
@@ -1070,7 +1114,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
         hoVaTen = manualName.trim();
         studentGender = manualGender;
         const teacherVal = manualTeacher.trim() || 'Chưa phân công';
-        const finalScore = calculateFinalScore(mssvValue);
 
         if (targetRoomGender !== 'Trống') {
           if (targetRoomGender !== manualGender) {
@@ -1121,8 +1164,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
           .upsert({
             MSV: mssvValue,
             HoVaTen: hoVaTen,
-            Phong: targetRoomForAdd,
-            DiemNeNep: finalScore
+            Phong: targetRoomForAdd
           }, { onConflict: 'MSV' });
 
         updatedStudentObj = newStudentPayload;
@@ -1138,6 +1180,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
 
       let updatedLockedRooms = lockedRoomsData ? [...lockedRoomsData] : calculateRoomAllocation();
       
+      // Xóa sinh viên này khỏi tất cả các phòng cũ trước khi đưa vào phòng mới để tránh trùng lặp
       updatedLockedRooms = updatedLockedRooms.map(r => ({
         ...r,
         students: (r.students || []).filter(st => getStudentCode(st) !== mssvValue)
@@ -1193,7 +1236,6 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
     try {
       const mssvValue = getStudentCode(studentToDelete);
       const hoVaTen = (studentToDelete as any).HoVaTen || (studentToDelete as any).name || '';
-      const finalScore = calculateFinalScore(mssvValue);
 
       await supabase
         .from('DanhSachSinhVien')
@@ -1205,8 +1247,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
         .upsert({
           MSV: mssvValue,
           HoVaTen: hoVaTen,
-          Phong: null,
-          DiemNeNep: finalScore
+          Phong: null
         }, { onConflict: 'MSV' });
 
       let updatedLockedRooms = lockedRoomsData ? [...lockedRoomsData] : calculateRoomAllocation();
@@ -1425,6 +1466,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
               <span>Tổng SV: <strong>{totalActiveAllocated} SV</strong></span>
             </div>
             
+            {/* THÊM HIỂN THỊ SỐ LƯỢNG NAM & NỮ */}
             <div className="stat-card" style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#eff6ff', padding: '6px 12px', borderRadius: '8px', border: '1px solid #bfdbfe', fontSize: '13px', color: '#1d4ed8' }}>
               <span>👨 Nam: <strong>{genderCounts.maleCount}</strong></span>
             </div>
@@ -1924,7 +1966,7 @@ export const RoomAllocation: React.FC<RoomAllocationProps> = ({
                                     ))}
                                     {canManage && (
                                       <select 
-                                        defaultValue=""
+                                        value=""
                                         onChange={(e) => handleViolationSelectChange(studentKey, day, e)} 
                                         className="violation-select-mini"
                                       >
